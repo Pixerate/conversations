@@ -75,14 +75,19 @@ flowchart TD
   - `ConversationSchema`: thread status (`open`, `resolved`, `archived`), participant lists, message counters.
   - `ThreadTreeNode`: recursive tree node structure.
 
-### Phase 2: Core Tree & Manager
+### Phase 2: Core Tree, Reconciliation & Manager
 - **`ThreadTree`**:
   - `buildThreadTree(messages, options)`: transforms flat arrays into trees with depth tracking and cycle protection.
   - `flattenTree(nodes)`: converts trees into display order for linear feeds.
   - `countDescendants(node)`: calculates total reply counts per comment.
+- **`Reconciliation` (Validated against Operative)**:
+  - `reconcileOptimisticMessages(optimisticList, serverList, windowMs)`: fuzzy matching by content, author, and timestamp window (±10s) to eliminate duplicates when snapshot listeners receive confirmed writes.
+- **`Reactions` (Validated against Operative)**:
+  - First-class emoji reactions (`addReaction`, `removeReaction`).
+  - `groupReactions(reactions, currentUserId, nameResolver)`: aggregated emoji counts and friendly user tooltips.
 - **`ConversationManager`**:
   - Thread lifecycle: `createConversation`, `resolveConversation`, `reopenConversation`.
-  - Message actions: `postMessage`, `editMessage`, `deleteMessage`.
+  - Message actions: `postMessage`, `editMessage`, `deleteMessage`, `addReaction`, `removeReaction`.
   - Optimistic updates with rollback support.
 - **`transcript`**:
   - `formatThreadAsMarkdown(thread)`: exports discussions for LLM agent context, summaries, or audit logs.
