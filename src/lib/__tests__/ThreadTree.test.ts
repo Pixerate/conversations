@@ -15,6 +15,7 @@ describe('ThreadTree', () => {
       status: 'sent',
       mentions: [],
       attachments: [],
+      reactions: [],
       createdAt
     };
   }

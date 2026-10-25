@@ -59,3 +59,11 @@ export class ConversationTranscript {
     return lines.join('\n').trim();
   }
 }
+
+export function formatThreadAsMarkdown(
+  conversation: Conversation,
+  messages: Message[],
+  options?: TranscriptOptions
+): string {
+  return ConversationTranscript.formatAsMarkdown(conversation, messages, options);
+}

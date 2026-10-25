@@ -106,6 +106,113 @@ export class ConversationManager {
     return message;
   }
 
+  /**
+   * Posts a message with optimistic staging and automatic rollback on failure.
+   */
+  public async postMessageOptimistic(
+    payload: PostMessagePayload,
+    callbacks: {
+      onOptimistic: (optimisticMessage: Message) => void;
+      onRollback?: (error: Error, tempId: string) => void;
+      onSuccess?: (confirmedMessage: Message) => void;
+    }
+  ): Promise<Message> {
+    const tempId =
+      payload.id || `temp_msg_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    const now = new Date().toISOString();
+
+    let mentions = payload.mentions ? [...payload.mentions] : [];
+    if (payload.richContent) {
+      const extractedIds = extractMentionIdsFromHtml(payload.richContent);
+      for (const id of extractedIds) {
+        if (!mentions.includes(id)) {
+          mentions.push(id);
+        }
+      }
+    }
+
+    const optimisticMessage: Message = {
+      id: tempId,
+      conversationId: payload.conversationId,
+      author: payload.author,
+      content: payload.content,
+      richContent: payload.richContent,
+      parentId: payload.parentId || null,
+      status: 'pending',
+      mentions,
+      attachments: payload.attachments || [],
+      reactions: payload.reactions || [],
+      metadata: payload.metadata || {},
+      createdAt: now
+    };
+
+    callbacks.onOptimistic(optimisticMessage);
+
+    try {
+      const confirmed = await this.postMessage({
+        ...payload,
+        id: payload.id
+      });
+      callbacks.onSuccess?.(confirmed);
+      return confirmed;
+    } catch (err: any) {
+      callbacks.onRollback?.(err, tempId);
+      throw err;
+    }
+  }
+
+  public async editMessage(
+    messageId: string,
+    content: string,
+    options?: { richContent?: string; conversationId?: string }
+  ): Promise<Message> {
+    const updates: Partial<Message> = { content };
+    if (options?.richContent !== undefined) {
+      updates.richContent = options.richContent;
+      updates.mentions = extractMentionIdsFromHtml(options.richContent);
+    }
+    return this.driver.updateMessage(messageId, updates, options?.conversationId);
+  }
+
+  public async deleteMessage(messageId: string, conversationId?: string): Promise<Message> {
+    return this.driver.deleteMessage(messageId, conversationId);
+  }
+
+  public async addReaction(
+    messageId: string,
+    emoji: string,
+    userId: string,
+    conversationId?: string
+  ): Promise<Message> {
+    return this.driver.addReaction(messageId, { emoji, userId }, conversationId);
+  }
+
+  public async removeReaction(
+    messageId: string,
+    emoji: string,
+    userId: string,
+    conversationId?: string
+  ): Promise<Message> {
+    return this.driver.removeReaction(messageId, emoji, userId, conversationId);
+  }
+
+  public async toggleReaction(
+    messageId: string,
+    emoji: string,
+    userId: string,
+    conversationId?: string
+  ): Promise<Message> {
+    if (conversationId) {
+      const messages = await this.driver.listMessages(conversationId);
+      const msg = messages.find(m => m.id === messageId);
+      const hasReacted = msg?.reactions?.some(r => r.emoji === emoji && r.userId === userId);
+      if (hasReacted) {
+        return this.removeReaction(messageId, emoji, userId, conversationId);
+      }
+    }
+    return this.addReaction(messageId, emoji, userId, conversationId);
+  }
+
   public async listMessages(conversationId: string): Promise<Message[]> {
     return this.driver.listMessages(conversationId);
   }
@@ -132,7 +239,11 @@ export class ConversationManager {
 
   public subscribeToConversation(
     conversationId: string,
-    onUpdate: (conversation: Conversation | null, messages: Message[], tree: ThreadTreeNode[]) => void,
+    onUpdate: (
+      conversation: Conversation | null,
+      messages: Message[],
+      tree: ThreadTreeNode[]
+    ) => void,
     onError?: (error: Error) => void
   ): () => void {
     return this.driver.subscribeToConversation(
@@ -143,5 +254,13 @@ export class ConversationManager {
       },
       onError
     );
+  }
+
+  public subscribeToEntityConversations(
+    entityId: string,
+    onUpdate: (conversations: Conversation[]) => void,
+    onError?: (error: Error) => void
+  ): () => void {
+    return this.driver.subscribeToEntityConversations(entityId, onUpdate, onError);
   }
 }

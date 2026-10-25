@@ -43,7 +43,31 @@ export interface ConversationDriver {
   /**
    * Updates a message (content, status, etc.).
    */
-  updateMessage(id: string, updates: Partial<Message>): Promise<Message>;
+  updateMessage(id: string, updates: Partial<Message>, conversationId?: string): Promise<Message>;
+
+  /**
+   * Soft deletes a message, preserving tree structure.
+   */
+  deleteMessage(id: string, conversationId?: string): Promise<Message>;
+
+  /**
+   * Adds an emoji reaction to a message.
+   */
+  addReaction(
+    messageId: string,
+    reaction: { emoji: string; userId: string },
+    conversationId?: string
+  ): Promise<Message>;
+
+  /**
+   * Removes an emoji reaction from a message.
+   */
+  removeReaction(
+    messageId: string,
+    emoji: string,
+    userId: string,
+    conversationId?: string
+  ): Promise<Message>;
 
   /**
    * Subscribes to real-time changes on a conversation document and its messages.
@@ -52,6 +76,16 @@ export interface ConversationDriver {
   subscribeToConversation(
     conversationId: string,
     onUpdate: (conversation: Conversation | null, messages: Message[]) => void,
+    onError?: (error: Error) => void
+  ): () => void;
+
+  /**
+   * Subscribes to real-time changes across all conversations linked to an entity.
+   * Returns an unsubscribe function.
+   */
+  subscribeToEntityConversations(
+    entityId: string,
+    onUpdate: (conversations: Conversation[]) => void,
     onError?: (error: Error) => void
   ): () => void;
 }

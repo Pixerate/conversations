@@ -146,4 +146,140 @@ describe('ConversationManager', () => {
     expect(md).toContain('Alice Smith');
     expect(md).toContain('We need to fix oauth tokens.');
   });
+
+  it('edits and deletes messages via ConversationManager', async () => {
+    const driver = new MemoryConversationDriver();
+    const manager = new ConversationManager({ driver });
+
+    const convo = await manager.createConversation({
+      entity: { id: 'task_7', type: 'task' }
+    });
+
+    const msg = await manager.postMessage({
+      conversationId: convo.id,
+      author: authorAlice,
+      content: 'Original'
+    });
+
+    const edited = await manager.editMessage(msg.id, 'Edited text', {
+      richContent: '<p>Edited with <span data-type="mention" data-id="user_bob">@Bob</span></p>'
+    });
+    expect(edited.content).toBe('Edited text');
+    expect(edited.mentions).toContain('user_bob');
+
+    const deleted = await manager.deleteMessage(msg.id);
+    expect(deleted.status).toBe('deleted');
+    expect(deleted.content).toBe('[This comment was deleted]');
+  });
+
+  it('manages emoji reactions and toggleReaction', async () => {
+    const driver = new MemoryConversationDriver();
+    const manager = new ConversationManager({ driver });
+
+    const convo = await manager.createConversation({
+      entity: { id: 'task_8', type: 'task' }
+    });
+
+    const msg = await manager.postMessage({
+      conversationId: convo.id,
+      author: authorAlice,
+      content: 'Let us launch today!'
+    });
+
+    // Add reaction
+    const withReaction = await manager.addReaction(msg.id, '🚀', 'user_bob', convo.id);
+    expect(withReaction.reactions).toHaveLength(1);
+    expect(withReaction.reactions[0].emoji).toBe('🚀');
+
+    // Toggle off
+    const toggledOff = await manager.toggleReaction(msg.id, '🚀', 'user_bob', convo.id);
+    expect(toggledOff.reactions).toHaveLength(0);
+
+    // Toggle on
+    const toggledOn = await manager.toggleReaction(msg.id, '🚀', 'user_bob', convo.id);
+    expect(toggledOn.reactions).toHaveLength(1);
+
+    // Remove reaction directly
+    const removed = await manager.removeReaction(msg.id, '🚀', 'user_bob', convo.id);
+    expect(removed.reactions).toHaveLength(0);
+  });
+
+  it('postMessageOptimistic stages optimistic message and calls onSuccess', async () => {
+    const driver = new MemoryConversationDriver();
+    const manager = new ConversationManager({ driver });
+
+    const convo = await manager.createConversation({
+      entity: { id: 'task_9', type: 'task' }
+    });
+
+    const staged: any[] = [];
+    const confirmedList: any[] = [];
+
+    const msg = await manager.postMessageOptimistic(
+      {
+        conversationId: convo.id,
+        author: authorAlice,
+        content: 'Optimistic message content'
+      },
+      {
+        onOptimistic: (opt) => staged.push(opt),
+        onSuccess: (conf) => confirmedList.push(conf)
+      }
+    );
+
+    expect(staged).toHaveLength(1);
+    expect(staged[0].status).toBe('pending');
+    expect(staged[0].content).toBe('Optimistic message content');
+
+    expect(confirmedList).toHaveLength(1);
+    expect(confirmedList[0].id).toBe(msg.id);
+    expect(confirmedList[0].status).toBe('sent');
+  });
+
+  it('postMessageOptimistic triggers rollback on driver failure', async () => {
+    const driver = new MemoryConversationDriver();
+    vi.spyOn(driver, 'postMessage').mockRejectedValueOnce(new Error('Network offline'));
+    const manager = new ConversationManager({ driver });
+
+    const convo = await manager.createConversation({
+      entity: { id: 'task_10', type: 'task' }
+    });
+
+    const staged: any[] = [];
+    const rollbacks: string[] = [];
+
+    await expect(
+      manager.postMessageOptimistic(
+        {
+          conversationId: convo.id,
+          author: authorAlice,
+          content: 'Failing comment'
+        },
+        {
+          onOptimistic: (opt) => staged.push(opt),
+          onRollback: (_err, tempId) => rollbacks.push(tempId)
+        }
+      )
+    ).rejects.toThrow('Network offline');
+
+    expect(staged).toHaveLength(1);
+    expect(rollbacks).toHaveLength(1);
+    expect(rollbacks[0]).toBe(staged[0].id);
+  });
+
+  it('subscribes to entity conversations', async () => {
+    const driver = new MemoryConversationDriver();
+    const manager = new ConversationManager({ driver });
+    const entityHook = vi.fn();
+
+    const unsub = manager.subscribeToEntityConversations('doc_42', entityHook);
+    expect(entityHook).toHaveBeenCalledWith([]);
+
+    const c1 = await manager.createConversation({
+      entity: { id: 'doc_42', type: 'document', title: 'Specs' }
+    });
+
+    expect(entityHook).toHaveBeenLastCalledWith([c1]);
+    unsub();
+  });
 });

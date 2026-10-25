@@ -89,6 +89,7 @@ export class ThreadTree {
               status: 'deleted',
               mentions: [],
               attachments: [],
+              reactions: [],
               createdAt: msg.createdAt
             };
             syntheticParents.set(parentId, placeholder);
@@ -158,3 +159,9 @@ export class ThreadTree {
     return null;
   }
 }
+
+export const buildThreadTree = ThreadTree.buildTree.bind(ThreadTree);
+export const flattenTree = ThreadTree.flattenTree.bind(ThreadTree);
+export const countDescendants = ThreadTree.countDescendants.bind(ThreadTree);
+export const findNodeInTree = ThreadTree.findNode.bind(ThreadTree);
+

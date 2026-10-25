@@ -15,6 +15,22 @@ export type EntityRef = z.infer<typeof EntityRefSchema>;
 export const MessageStatusSchema = z.enum(['sent', 'pending', 'failed', 'deleted']);
 export type MessageStatus = z.infer<typeof MessageStatusSchema>;
 
+export const MessageReactionSchema = z.object({
+  emoji: z.string(),
+  userId: z.string(),
+  createdAt: z.string().optional()
+});
+export type MessageReaction = z.infer<typeof MessageReactionSchema>;
+
+export interface GroupedReaction {
+  emoji: string;
+  count: number;
+  hasReacted: boolean;
+  users: string[];
+  userNames: string[];
+  tooltip: string;
+}
+
 export const MessageSchema = z.object({
   id: z.string(),
   conversationId: z.string(),
@@ -25,6 +41,7 @@ export const MessageSchema = z.object({
   status: MessageStatusSchema.default('sent'),
   mentions: z.array(z.string()).default([]),
   attachments: z.array(z.record(z.unknown())).default([]),
+  reactions: z.array(MessageReactionSchema).default([]),
   metadata: z.record(z.unknown()).optional(),
   createdAt: z.string(),
   updatedAt: z.string().optional()
@@ -38,8 +55,10 @@ export type PostMessagePayload = {
   content: string;
   richContent?: string;
   parentId?: string | null;
+  status?: MessageStatus;
   mentions?: string[];
   attachments?: Record<string, unknown>[];
+  reactions?: MessageReaction[];
   metadata?: Record<string, unknown>;
 };
 

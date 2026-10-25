@@ -133,6 +133,7 @@ export class FirestoreConversationDriver implements ConversationDriver {
       status: 'sent',
       mentions: payload.mentions || [],
       attachments: payload.attachments || [],
+      reactions: payload.reactions || [],
       metadata: payload.metadata || {},
       createdAt: now
     };
@@ -167,9 +168,112 @@ export class FirestoreConversationDriver implements ConversationDriver {
     return this.snapDocs(snap).map(d => this.snapData(d) as Message);
   }
 
-  public async updateMessage(id: string, updates: Partial<Message>): Promise<Message> {
-    // Requires conversationId in metadata or parameter, fallback search
-    throw new Error('updateMessage on FirestoreDriver requires conversation subcollection path.');
+  public async updateMessage(
+    id: string,
+    updates: Partial<Message>,
+    conversationId?: string
+  ): Promise<Message> {
+    const targetConvoId = conversationId || updates.conversationId;
+    if (!targetConvoId) {
+      throw new Error(
+        'updateMessage on FirestoreDriver requires conversationId (pass as third argument or via updates.conversationId).'
+      );
+    }
+
+    const convoRef = this.getDocRef(this.conversationsCol, targetConvoId);
+    const msgRef = this.getSubDocRef(convoRef, this.messagesSubcol, id);
+    const snap = await this.getDoc(msgRef);
+    if (!this.snapExists(snap)) {
+      throw new Error(`Message not found: ${id}`);
+    }
+
+    const existing = this.snapData(snap) as Message;
+    const updated: Message = {
+      ...existing,
+      ...updates,
+      updatedAt: new Date().toISOString()
+    };
+
+    await this.setDoc(msgRef, sanitizeDocument(updated as any));
+    return updated;
+  }
+
+  public async deleteMessage(id: string, conversationId?: string): Promise<Message> {
+    return this.updateMessage(
+      id,
+      {
+        status: 'deleted',
+        content: '[This comment was deleted]',
+        richContent: undefined,
+        attachments: []
+      },
+      conversationId
+    );
+  }
+
+  public async addReaction(
+    messageId: string,
+    reaction: { emoji: string; userId: string },
+    conversationId?: string
+  ): Promise<Message> {
+    const targetConvoId = conversationId;
+    if (!targetConvoId) {
+      throw new Error('addReaction on FirestoreDriver requires conversationId.');
+    }
+
+    const convoRef = this.getDocRef(this.conversationsCol, targetConvoId);
+    const msgRef = this.getSubDocRef(convoRef, this.messagesSubcol, messageId);
+    const snap = await this.getDoc(msgRef);
+    if (!this.snapExists(snap)) {
+      throw new Error(`Message not found: ${messageId}`);
+    }
+
+    const existing = this.snapData(snap) as Message;
+    const currentReactions = existing.reactions || [];
+    const alreadyExists = currentReactions.some(
+      r => r.emoji === reaction.emoji && r.userId === reaction.userId
+    );
+    if (alreadyExists) {
+      return existing;
+    }
+
+    const updatedReactions = [
+      ...currentReactions,
+      {
+        emoji: reaction.emoji,
+        userId: reaction.userId,
+        createdAt: new Date().toISOString()
+      }
+    ];
+
+    return this.updateMessage(messageId, { reactions: updatedReactions }, targetConvoId);
+  }
+
+  public async removeReaction(
+    messageId: string,
+    emoji: string,
+    userId: string,
+    conversationId?: string
+  ): Promise<Message> {
+    const targetConvoId = conversationId;
+    if (!targetConvoId) {
+      throw new Error('removeReaction on FirestoreDriver requires conversationId.');
+    }
+
+    const convoRef = this.getDocRef(this.conversationsCol, targetConvoId);
+    const msgRef = this.getSubDocRef(convoRef, this.messagesSubcol, messageId);
+    const snap = await this.getDoc(msgRef);
+    if (!this.snapExists(snap)) {
+      throw new Error(`Message not found: ${messageId}`);
+    }
+
+    const existing = this.snapData(snap) as Message;
+    const currentReactions = existing.reactions || [];
+    const updatedReactions = currentReactions.filter(
+      r => !(r.emoji === emoji && r.userId === userId)
+    );
+
+    return this.updateMessage(messageId, { reactions: updatedReactions }, targetConvoId);
   }
 
   public subscribeToConversation(
@@ -205,6 +309,28 @@ export class FirestoreConversationDriver implements ConversationDriver {
     return () => {
       if (typeof unsubConvo === 'function') unsubConvo();
       if (typeof unsubMsgs === 'function') unsubMsgs();
+    };
+  }
+
+  public subscribeToEntityConversations(
+    entityId: string,
+    onUpdate: (conversations: Conversation[]) => void,
+    onError?: (error: Error) => void
+  ): () => void {
+    const colRef = this.getCollectionRef(this.conversationsCol);
+    const q = this.queryWhere(colRef, 'entity.id', '==', entityId);
+
+    const unsub = this.onSnapshot(
+      q,
+      (snap: any) => {
+        const convos = this.snapDocs(snap).map((d: any) => this.snapData(d) as Conversation);
+        onUpdate(convos);
+      },
+      onError
+    );
+
+    return () => {
+      if (typeof unsub === 'function') unsub();
     };
   }
 

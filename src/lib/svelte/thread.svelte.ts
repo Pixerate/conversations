@@ -1,6 +1,8 @@
 import type { ConversationDriver } from '../drivers/ConversationDriver.js';
-import type { Conversation, Message, ThreadTreeNode } from '../types.js';
+import type { Conversation, Message, ThreadTreeNode, GroupedReaction } from '../types.js';
 import { ThreadTree } from '../core/ThreadTree.js';
+import { reconcileOptimisticMessages, reconcileAndMergeMessages } from '../core/reconciliation.js';
+import { groupReactions } from '../core/reactions.js';
 
 export class ThreadStore {
   private driver: ConversationDriver;
@@ -8,10 +10,14 @@ export class ThreadStore {
   private unsubscribe?: () => void;
 
   public conversation = $state<Conversation | null>(null);
-  public messages = $state<Message[]>([]);
+  public serverMessages = $state<Message[]>([]);
+  public optimisticMessages = $state<Message[]>([]);
   public loading = $state<boolean>(true);
   public error = $state<Error | null>(null);
 
+  public messages = $derived<Message[]>(
+    reconcileAndMergeMessages(this.optimisticMessages, this.serverMessages)
+  );
   public tree = $derived<ThreadTreeNode[]>(ThreadTree.buildTree(this.messages));
   public totalCount = $derived<number>(this.messages.length);
   public isResolved = $derived<boolean>(this.conversation?.status === 'resolved');
@@ -28,7 +34,8 @@ export class ThreadStore {
       this.conversationId,
       (convo, msgs) => {
         this.conversation = convo;
-        this.messages = msgs;
+        this.serverMessages = msgs;
+        this.optimisticMessages = reconcileOptimisticMessages(this.optimisticMessages, msgs);
         this.loading = false;
         this.error = null;
       },
@@ -39,13 +46,81 @@ export class ThreadStore {
     );
   }
 
-  public async postReply(content: string, author: any, parentId?: string | null) {
-    return this.driver.postMessage({
+  public async postReply(
+    content: string,
+    author: any,
+    parentId?: string | null,
+    richContent?: string
+  ): Promise<Message> {
+    const tempId = `temp_msg_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    const optimisticMsg: Message = {
+      id: tempId,
       conversationId: this.conversationId,
       author,
       content,
-      parentId
-    });
+      richContent,
+      parentId: parentId || null,
+      status: 'pending',
+      mentions: [],
+      attachments: [],
+      reactions: [],
+      createdAt: new Date().toISOString()
+    };
+
+    this.optimisticMessages = [...this.optimisticMessages, optimisticMsg];
+
+    try {
+      const confirmed = await this.driver.postMessage({
+        conversationId: this.conversationId,
+        author,
+        content,
+        richContent,
+        parentId
+      });
+      return confirmed;
+    } catch (err: any) {
+      this.optimisticMessages = this.optimisticMessages.filter(m => m.id !== tempId);
+      this.error = err;
+      throw err;
+    }
+  }
+
+  public async editMessage(messageId: string, content: string, richContent?: string) {
+    return this.driver.updateMessage(
+      messageId,
+      { content, richContent },
+      this.conversationId
+    );
+  }
+
+  public async deleteMessage(messageId: string) {
+    return this.driver.deleteMessage(messageId, this.conversationId);
+  }
+
+  public async addReaction(messageId: string, emoji: string, userId: string) {
+    return this.driver.addReaction(messageId, { emoji, userId }, this.conversationId);
+  }
+
+  public async removeReaction(messageId: string, emoji: string, userId: string) {
+    return this.driver.removeReaction(messageId, emoji, userId, this.conversationId);
+  }
+
+  public async toggleReaction(messageId: string, emoji: string, userId: string) {
+    const msg = this.messages.find(m => m.id === messageId);
+    const hasReacted = msg?.reactions?.some(r => r.emoji === emoji && r.userId === userId);
+    if (hasReacted) {
+      return this.removeReaction(messageId, emoji, userId);
+    }
+    return this.addReaction(messageId, emoji, userId);
+  }
+
+  public getGroupedReactions(
+    messageId: string,
+    currentUserId?: string,
+    nameResolver?: (userId: string) => string
+  ): GroupedReaction[] {
+    const msg = this.messages.find(m => m.id === messageId);
+    return groupReactions(msg?.reactions || [], currentUserId, nameResolver);
   }
 
   public async resolve(resolvedBy?: string) {

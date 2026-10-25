@@ -84,3 +84,22 @@ Querying messages across subcollections (e.g. `collectionGroup('messages')`) req
 
 - For React: `ConversationManager` and `ThreadStore` expose an immutable snapshot getter `getSnapshot()` that returns a cached object reference whenever state hasn't changed.
 - For Svelte 5: Encapsulate reactive state in a rune class with `$state` properties and `$derived` getters, exposing clean methods for actions.
+
+---
+
+## 6. Optimistic Message Reconciliation Reference Stability
+
+### ⚠️ Gotcha
+
+When reconciling optimistic messages against real-time server snapshots in Svelte 5 runes (`$state`) or React 19 external stores (`useSyncExternalStore`), generating a new array reference on every snapshot — even when no optimistic messages were matched or removed — triggers unnecessary reactive cascade updates and can cause infinite re-render cycles or flickering input elements.
+
+### ✅ Solution
+
+- In `reconcileOptimisticMessages`, compare the remaining list length against the incoming list length. If no optimistic messages were reconciled, return the exact same array reference:
+  ```ts
+  if (remaining.length === optimisticMessages.length) {
+    return optimisticMessages;
+  }
+  ```
+- Similarly, in `reconcileAndMergeMessages`, if `optimisticMessages.length === 0`, return `serverMessages` directly to preserve referential equality.
+

@@ -27,6 +27,7 @@ describe('ConversationTranscript', () => {
       content: 'Top level proposal',
       mentions: [],
       attachments: [],
+      reactions: [],
       createdAt: d1,
       updatedAt: d1
     },
@@ -39,6 +40,7 @@ describe('ConversationTranscript', () => {
       content: 'Looks solid, @Alice.',
       mentions: ['u1'],
       attachments: [],
+      reactions: [],
       createdAt: d2,
       updatedAt: d2
     },
@@ -51,6 +53,7 @@ describe('ConversationTranscript', () => {
       content: 'Automated check: passes validation.',
       mentions: [],
       attachments: [],
+      reactions: [],
       createdAt: d3,
       updatedAt: d3
     }
