@@ -1,0 +1,35 @@
+name: Changeset Check
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+jobs:
+  changeset:
+    name: Verify Changeset Included
+    runs-on: ubuntu-latest
+    if: github.event.pull_request.draft == false && github.actor != 'dependabot[bot]'
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: 'npm'
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Verify Changeset Exists
+        run: |
+          CHANGESET_COUNT=$(find .changeset -name "*.md" ! -name "README.md" | wc -l)
+          if [ "$CHANGESET_COUNT" -eq 0 ]; then
+            echo "::error::No changeset detected in .changeset/! Please run 'npx changeset' and commit the resulting markdown file."
+            exit 1
+          fi
+          echo "Found $CHANGESET_COUNT changeset(s). Verification passed."
