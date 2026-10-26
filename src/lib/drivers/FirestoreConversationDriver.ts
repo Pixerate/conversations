@@ -5,6 +5,7 @@ import type {
   Message,
   PostMessagePayload
 } from '../types.js';
+import { hasUserReacted } from '../core/reactions.js';
 
 export interface FirestoreConversationDriverOptions {
   /**
@@ -21,20 +22,119 @@ export interface FirestoreConversationDriverOptions {
   messagesSubcollection?: string;
 }
 
-function sanitizeDocument(data: Record<string, unknown>): Record<string, unknown> {
-  const sanitized: Record<string, unknown> = {};
-  for (const [key, val] of Object.entries(data)) {
-    if (val !== undefined) {
-      sanitized[key] = val;
-    }
+type WhereClause = [field: string, op: string, value: unknown];
+
+interface QuerySpec {
+  where?: WhereClause[];
+  orderBy?: [field: string, direction: 'asc' | 'desc'];
+}
+
+interface Transaction {
+  get(ref: any): Promise<any>;
+  set(ref: any, data: Record<string, unknown>): unknown;
+  update(ref: any, data: Record<string, unknown>): unknown;
+}
+
+/**
+ * The handful of Firestore operations the driver needs, bound to one SDK flavour.
+ * Admin SDK refs carry their own methods; the modular SDK needs free functions
+ * (`doc`, `query`, `getDoc`, ...) applied to refs it created itself.
+ */
+interface FirestoreOps {
+  doc(path: string): any;
+  query(collectionPath: string, spec: QuerySpec): any;
+  getDoc(ref: any): Promise<any>;
+  getDocs(query: any): Promise<any>;
+  setDoc(ref: any, data: Record<string, unknown>): Promise<unknown>;
+  runTransaction<T>(fn: (tx: Transaction) => Promise<T>): Promise<T>;
+  onSnapshot(ref: any, onNext: (snap: any) => void, onError?: (err: Error) => void): () => void;
+}
+
+function adminOps(db: any): FirestoreOps {
+  return {
+    doc: path => db.doc(path),
+    query: (collectionPath, { where = [], orderBy }) => {
+      let q = db.collection(collectionPath);
+      for (const [field, op, value] of where) q = q.where(field, op, value);
+      if (orderBy) q = q.orderBy(...orderBy);
+      return q;
+    },
+    getDoc: ref => ref.get(),
+    getDocs: query => query.get(),
+    setDoc: (ref, data) => ref.set(data),
+    runTransaction: fn => db.runTransaction(fn),
+    onSnapshot: (ref, onNext, onError) => ref.onSnapshot(onNext, onError)
+  };
+}
+
+async function modularOps(db: any): Promise<FirestoreOps> {
+  const fs = await import('firebase/firestore');
+  return {
+    doc: path => fs.doc(db, path),
+    query: (collectionPath, { where = [], orderBy }) =>
+      fs.query(
+        fs.collection(db, collectionPath),
+        ...where.map(([field, op, value]) => fs.where(field, op as any, value)),
+        ...(orderBy ? [fs.orderBy(...orderBy)] : [])
+      ),
+    getDoc: ref => fs.getDoc(ref),
+    getDocs: query => fs.getDocs(query),
+    setDoc: (ref, data) => fs.setDoc(ref, data),
+    runTransaction: fn => fs.runTransaction(db, fn as any),
+    onSnapshot: (ref, onNext, onError) => fs.onSnapshot(ref, onNext, onError)
+  };
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  if (value === null || typeof value !== 'object') return false;
+  const proto = Object.getPrototypeOf(value);
+  return proto === Object.prototype || proto === null;
+}
+
+/**
+ * Recursively strips `undefined` (which Firestore rejects at any depth) from plain objects
+ * and arrays. Non-plain values such as Timestamps and FieldValue sentinels pass through.
+ */
+function sanitizeValue(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.filter(item => item !== undefined).map(sanitizeValue);
   }
-  return sanitized;
+  if (isPlainObject(value)) {
+    const sanitized: Record<string, unknown> = {};
+    for (const [key, val] of Object.entries(value)) {
+      if (val !== undefined) {
+        sanitized[key] = sanitizeValue(val);
+      }
+    }
+    return sanitized;
+  }
+  return value;
+}
+
+function sanitizeDocument(data: object): Record<string, unknown> {
+  return sanitizeValue(data) as Record<string, unknown>;
+}
+
+function snapExists(snap: any): boolean {
+  if (typeof snap.exists === 'function') return snap.exists();
+  return !!snap.exists;
+}
+
+function snapData(snap: any): any {
+  if (typeof snap.data === 'function') return snap.data();
+  return snap.data;
+}
+
+function snapDocs(snap: any): any[] {
+  if (Array.isArray(snap.docs)) return snap.docs;
+  return [];
 }
 
 export class FirestoreConversationDriver implements ConversationDriver {
   private db: any;
   private conversationsCol: string;
   private messagesSubcol: string;
+  private opsPromise?: Promise<FirestoreOps>;
 
   constructor(options: FirestoreConversationDriverOptions) {
     if (!options?.db) {
@@ -46,25 +146,25 @@ export class FirestoreConversationDriver implements ConversationDriver {
   }
 
   public async getConversation(id: string): Promise<Conversation | null> {
-    const docRef = this.getDocRef(this.conversationsCol, id);
-    const snap = await this.getDoc(docRef);
-    if (!this.snapExists(snap)) return null;
-    return this.snapData(snap) as Conversation;
+    const ops = await this.ops();
+    const snap = await ops.getDoc(ops.doc(this.conversationPath(id)));
+    if (!snapExists(snap)) return null;
+    return snapData(snap) as Conversation;
   }
 
   public async getConversationByEntity(
     entityId: string,
     entityType?: string
   ): Promise<Conversation | null> {
-    const colRef = this.getCollectionRef(this.conversationsCol);
-    let q = this.queryWhere(colRef, 'entity.id', '==', entityId);
+    const ops = await this.ops();
+    const where: WhereClause[] = [['entity.id', '==', entityId]];
     if (entityType) {
-      q = this.queryWhere(q, 'entity.type', '==', entityType);
+      where.push(['entity.type', '==', entityType]);
     }
-    const snap = await this.getDocs(q);
-    const docs = this.snapDocs(snap);
+    const snap = await ops.getDocs(ops.query(this.conversationsCol, { where }));
+    const docs = snapDocs(snap);
     if (docs.length === 0) return null;
-    return this.snapData(docs[0]) as Conversation;
+    return snapData(docs[0]) as Conversation;
   }
 
   public async createConversation(payload: CreateConversationPayload): Promise<Conversation> {
@@ -82,8 +182,8 @@ export class FirestoreConversationDriver implements ConversationDriver {
       updatedAt: now
     };
 
-    const docRef = this.getDocRef(this.conversationsCol, id);
-    await this.setDoc(docRef, sanitizeDocument(conversation as any));
+    const ops = await this.ops();
+    await ops.setDoc(ops.doc(this.conversationPath(id)), sanitizeDocument(conversation));
 
     return conversation;
   }
@@ -93,79 +193,86 @@ export class FirestoreConversationDriver implements ConversationDriver {
     status: 'open' | 'resolved' | 'archived',
     resolvedBy?: string
   ): Promise<Conversation> {
-    const docRef = this.getDocRef(this.conversationsCol, id);
-    const snap = await this.getDoc(docRef);
-    if (!this.snapExists(snap)) {
-      throw new Error(`Conversation not found: ${id}`);
-    }
+    const ops = await this.ops();
+    const docRef = ops.doc(this.conversationPath(id));
 
-    const now = new Date().toISOString();
-    const existing = this.snapData(snap) as Conversation;
-    const updated: Conversation = {
-      ...existing,
-      status,
-      resolvedAt: status === 'resolved' ? now : undefined,
-      resolvedBy: status === 'resolved' ? resolvedBy : undefined,
-      updatedAt: now
-    };
+    return ops.runTransaction(async tx => {
+      const snap = await tx.get(docRef);
+      if (!snapExists(snap)) {
+        throw new Error(`Conversation not found: ${id}`);
+      }
 
-    await this.setDoc(docRef, sanitizeDocument(updated as any));
-    return updated;
+      const now = new Date().toISOString();
+      const existing = snapData(snap) as Conversation;
+      const updated: Conversation = {
+        ...existing,
+        status,
+        resolvedAt: status === 'resolved' ? now : undefined,
+        resolvedBy: status === 'resolved' ? resolvedBy : undefined,
+        updatedAt: now
+      };
+
+      tx.set(docRef, sanitizeDocument(updated));
+      return updated;
+    });
   }
 
   public async postMessage(payload: PostMessagePayload): Promise<Message> {
-    const convoRef = this.getDocRef(this.conversationsCol, payload.conversationId);
-    const convoSnap = await this.getDoc(convoRef);
-    if (!this.snapExists(convoSnap)) {
-      throw new Error(`Conversation not found: ${payload.conversationId}`);
-    }
+    const ops = await this.ops();
+    const convoRef = ops.doc(this.conversationPath(payload.conversationId));
 
     const id = payload.id || `msg_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-    const now = new Date().toISOString();
+    const msgRef = ops.doc(this.messagePath(payload.conversationId, id));
 
-    const message: Message = {
-      id,
-      conversationId: payload.conversationId,
-      author: payload.author,
-      content: payload.content,
-      richContent: payload.richContent,
-      parentId: payload.parentId || null,
-      status: 'sent',
-      mentions: payload.mentions || [],
-      attachments: payload.attachments || [],
-      reactions: payload.reactions || [],
-      metadata: payload.metadata || {},
-      createdAt: now
-    };
+    // The message write and the summary update (messageCount, participantIds) commit
+    // together, and the transaction retries on contention so concurrent posts never
+    // lose an increment or a participant.
+    return ops.runTransaction(async tx => {
+      const convoSnap = await tx.get(convoRef);
+      if (!snapExists(convoSnap)) {
+        throw new Error(`Conversation not found: ${payload.conversationId}`);
+      }
 
-    // Subcollection: conversations/{convoId}/messages/{id}
-    const msgRef = this.getSubDocRef(convoRef, this.messagesSubcol, id);
-    await this.setDoc(msgRef, sanitizeDocument(message as any));
+      const now = new Date().toISOString();
+      const message: Message = {
+        id,
+        conversationId: payload.conversationId,
+        author: payload.author,
+        content: payload.content,
+        richContent: payload.richContent,
+        parentId: payload.parentId || null,
+        status: 'sent',
+        mentions: payload.mentions || [],
+        attachments: payload.attachments || [],
+        reactions: payload.reactions || [],
+        metadata: payload.metadata || {},
+        createdAt: now
+      };
 
-    // Update parent metadata
-    const convoData = this.snapData(convoSnap) as Conversation;
-    const participants = new Set(convoData.participantIds || []);
-    if (payload.author.id) participants.add(payload.author.id);
+      const convoData = snapData(convoSnap) as Conversation;
+      const participants = new Set(convoData.participantIds || []);
+      if (payload.author.id) participants.add(payload.author.id);
 
-    const updatedConvo: Partial<Conversation> = {
-      participantIds: Array.from(participants),
-      messageCount: (convoData.messageCount || 0) + 1,
-      lastMessageAt: now,
-      updatedAt: now
-    };
+      tx.set(msgRef, sanitizeDocument(message));
+      tx.update(
+        convoRef,
+        sanitizeDocument({
+          participantIds: Array.from(participants),
+          messageCount: (convoData.messageCount || 0) + 1,
+          lastMessageAt: now,
+          updatedAt: now
+        })
+      );
 
-    await this.updateDoc(convoRef, sanitizeDocument(updatedConvo as any));
-
-    return message;
+      return message;
+    });
   }
 
   public async listMessages(conversationId: string): Promise<Message[]> {
-    const convoRef = this.getDocRef(this.conversationsCol, conversationId);
-    const msgCol = this.getSubCollectionRef(convoRef, this.messagesSubcol);
-    const q = this.queryOrderBy(msgCol, 'createdAt', 'asc');
-    const snap = await this.getDocs(q);
-
-    return this.snapDocs(snap).map(d => this.snapData(d) as Message);
+    const ops = await this.ops();
+    const q = ops.query(this.messagesPath(conversationId), { orderBy: ['createdAt', 'asc'] });
+    const snap = await ops.getDocs(q);
+    return snapDocs(snap).map(d => snapData(d) as Message);
   }
 
   public async updateMessage(
@@ -179,23 +286,7 @@ export class FirestoreConversationDriver implements ConversationDriver {
         'updateMessage on FirestoreDriver requires conversationId (pass as third argument or via updates.conversationId).'
       );
     }
-
-    const convoRef = this.getDocRef(this.conversationsCol, targetConvoId);
-    const msgRef = this.getSubDocRef(convoRef, this.messagesSubcol, id);
-    const snap = await this.getDoc(msgRef);
-    if (!this.snapExists(snap)) {
-      throw new Error(`Message not found: ${id}`);
-    }
-
-    const existing = this.snapData(snap) as Message;
-    const updated: Message = {
-      ...existing,
-      ...updates,
-      updatedAt: new Date().toISOString()
-    };
-
-    await this.setDoc(msgRef, sanitizeDocument(updated as any));
-    return updated;
+    return this.mutateMessage(id, targetConvoId, () => updates);
   }
 
   public async deleteMessage(id: string, conversationId?: string): Promise<Message> {
@@ -216,37 +307,14 @@ export class FirestoreConversationDriver implements ConversationDriver {
     reaction: { emoji: string; userId: string },
     conversationId?: string
   ): Promise<Message> {
-    const targetConvoId = conversationId;
-    if (!targetConvoId) {
+    if (!conversationId) {
       throw new Error('addReaction on FirestoreDriver requires conversationId.');
     }
-
-    const convoRef = this.getDocRef(this.conversationsCol, targetConvoId);
-    const msgRef = this.getSubDocRef(convoRef, this.messagesSubcol, messageId);
-    const snap = await this.getDoc(msgRef);
-    if (!this.snapExists(snap)) {
-      throw new Error(`Message not found: ${messageId}`);
-    }
-
-    const existing = this.snapData(snap) as Message;
-    const currentReactions = existing.reactions || [];
-    const alreadyExists = currentReactions.some(
-      r => r.emoji === reaction.emoji && r.userId === reaction.userId
+    return this.mutateMessage(messageId, conversationId, existing =>
+      hasUserReacted(existing.reactions, reaction.emoji, reaction.userId)
+        ? null
+        : { reactions: withReaction(existing, reaction) }
     );
-    if (alreadyExists) {
-      return existing;
-    }
-
-    const updatedReactions = [
-      ...currentReactions,
-      {
-        emoji: reaction.emoji,
-        userId: reaction.userId,
-        createdAt: new Date().toISOString()
-      }
-    ];
-
-    return this.updateMessage(messageId, { reactions: updatedReactions }, targetConvoId);
   }
 
   public async removeReaction(
@@ -255,25 +323,27 @@ export class FirestoreConversationDriver implements ConversationDriver {
     userId: string,
     conversationId?: string
   ): Promise<Message> {
-    const targetConvoId = conversationId;
-    if (!targetConvoId) {
+    if (!conversationId) {
       throw new Error('removeReaction on FirestoreDriver requires conversationId.');
     }
+    return this.mutateMessage(messageId, conversationId, existing => ({
+      reactions: withoutReaction(existing, emoji, userId)
+    }));
+  }
 
-    const convoRef = this.getDocRef(this.conversationsCol, targetConvoId);
-    const msgRef = this.getSubDocRef(convoRef, this.messagesSubcol, messageId);
-    const snap = await this.getDoc(msgRef);
-    if (!this.snapExists(snap)) {
-      throw new Error(`Message not found: ${messageId}`);
+  public async toggleReaction(
+    messageId: string,
+    reaction: { emoji: string; userId: string },
+    conversationId?: string
+  ): Promise<Message> {
+    if (!conversationId) {
+      throw new Error('toggleReaction on FirestoreDriver requires conversationId.');
     }
-
-    const existing = this.snapData(snap) as Message;
-    const currentReactions = existing.reactions || [];
-    const updatedReactions = currentReactions.filter(
-      r => !(r.emoji === emoji && r.userId === userId)
-    );
-
-    return this.updateMessage(messageId, { reactions: updatedReactions }, targetConvoId);
+    return this.mutateMessage(messageId, conversationId, existing => ({
+      reactions: hasUserReacted(existing.reactions, reaction.emoji, reaction.userId)
+        ? withoutReaction(existing, reaction.emoji, reaction.userId)
+        : withReaction(existing, reaction)
+    }));
   }
 
   public subscribeToConversation(
@@ -281,34 +351,40 @@ export class FirestoreConversationDriver implements ConversationDriver {
     onUpdate: (conversation: Conversation | null, messages: Message[]) => void,
     onError?: (error: Error) => void
   ): () => void {
-    const convoRef = this.getDocRef(this.conversationsCol, conversationId);
-    const msgCol = this.getSubCollectionRef(convoRef, this.messagesSubcol);
-    const msgQuery = this.queryOrderBy(msgCol, 'createdAt', 'asc');
-
     let currentConvo: Conversation | null = null;
     let currentMsgs: Message[] = [];
+    let convoReady = false;
+    let msgsReady = false;
 
-    const unsubConvo = this.onSnapshot(
-      convoRef,
-      (snap: any) => {
-        currentConvo = this.snapExists(snap) ? (this.snapData(snap) as Conversation) : null;
-        onUpdate(currentConvo, currentMsgs);
+    // Hold back the first update until both listeners have delivered, so consumers never
+    // see a loaded conversation with an empty message list that then pops in.
+    const emit = () => {
+      if (convoReady && msgsReady) onUpdate(currentConvo, currentMsgs);
+    };
+
+    const unsubConvo = this.listen(
+      ops => ops.doc(this.conversationPath(conversationId)),
+      snap => {
+        currentConvo = snapExists(snap) ? (snapData(snap) as Conversation) : null;
+        convoReady = true;
+        emit();
       },
       onError
     );
 
-    const unsubMsgs = this.onSnapshot(
-      msgQuery,
-      (snap: any) => {
-        currentMsgs = this.snapDocs(snap).map((d: any) => this.snapData(d) as Message);
-        onUpdate(currentConvo, currentMsgs);
+    const unsubMsgs = this.listen(
+      ops => ops.query(this.messagesPath(conversationId), { orderBy: ['createdAt', 'asc'] }),
+      snap => {
+        currentMsgs = snapDocs(snap).map(d => snapData(d) as Message);
+        msgsReady = true;
+        emit();
       },
       onError
     );
 
     return () => {
-      if (typeof unsubConvo === 'function') unsubConvo();
-      if (typeof unsubMsgs === 'function') unsubMsgs();
+      unsubConvo();
+      unsubMsgs();
     };
   }
 
@@ -317,112 +393,105 @@ export class FirestoreConversationDriver implements ConversationDriver {
     onUpdate: (conversations: Conversation[]) => void,
     onError?: (error: Error) => void
   ): () => void {
-    const colRef = this.getCollectionRef(this.conversationsCol);
-    const q = this.queryWhere(colRef, 'entity.id', '==', entityId);
-
-    const unsub = this.onSnapshot(
-      q,
-      (snap: any) => {
-        const convos = this.snapDocs(snap).map((d: any) => this.snapData(d) as Conversation);
-        onUpdate(convos);
-      },
+    return this.listen(
+      ops => ops.query(this.conversationsCol, { where: [['entity.id', '==', entityId]] }),
+      snap => onUpdate(snapDocs(snap).map(d => snapData(d) as Conversation)),
       onError
     );
+  }
+
+  private ops(): Promise<FirestoreOps> {
+    if (!this.opsPromise) {
+      this.opsPromise =
+        typeof this.db.collection === 'function'
+          ? Promise.resolve(adminOps(this.db))
+          : modularOps(this.db);
+    }
+    return this.opsPromise;
+  }
+
+  /**
+   * Attaches a snapshot listener once the SDK is ready. Unsubscribing before then cancels
+   * the pending attach instead of leaving a listener behind that nothing can remove.
+   */
+  private listen(
+    target: (ops: FirestoreOps) => any,
+    onNext: (snap: any) => void,
+    onError?: (err: Error) => void
+  ): () => void {
+    let cancelled = false;
+    let unsub: (() => void) | undefined;
+
+    this.ops()
+      .then(ops => {
+        if (cancelled) return;
+        unsub = ops.onSnapshot(target(ops), onNext, onError);
+      })
+      .catch(err => {
+        if (!cancelled) onError?.(err);
+      });
 
     return () => {
-      if (typeof unsub === 'function') unsub();
+      cancelled = true;
+      unsub?.();
+      unsub = undefined;
     };
   }
 
-  // --- Firestore SDK Compatibility Helpers ---
-  private getDocRef(collection: string, id: string): any {
-    if (typeof this.db.collection === 'function') {
-      return this.db.collection(collection).doc(id);
-    }
-    // Modular SDK
-    return { _type: 'doc', path: `${collection}/${id}`, db: this.db };
-  }
+  /**
+   * Reads a message and writes the result of `mutate` in one transaction, so concurrent
+   * edits and reactions are retried against fresh data instead of overwriting each other.
+   * `mutate` may run more than once and must not have side effects; returning null skips
+   * the write.
+   */
+  private async mutateMessage(
+    id: string,
+    conversationId: string,
+    mutate: (existing: Message) => Partial<Message> | null
+  ): Promise<Message> {
+    const ops = await this.ops();
+    const msgRef = ops.doc(this.messagePath(conversationId, id));
 
-  private getCollectionRef(collection: string): any {
-    if (typeof this.db.collection === 'function') {
-      return this.db.collection(collection);
-    }
-    return { _type: 'collection', path: collection, db: this.db };
-  }
+    return ops.runTransaction(async tx => {
+      const snap = await tx.get(msgRef);
+      if (!snapExists(snap)) {
+        throw new Error(`Message not found: ${id}`);
+      }
 
-  private getSubDocRef(parentRef: any, subcollection: string, id: string): any {
-    if (typeof parentRef.collection === 'function') {
-      return parentRef.collection(subcollection).doc(id);
-    }
-    return { _type: 'doc', path: `${parentRef.path}/${subcollection}/${id}`, db: this.db };
-  }
+      const existing = snapData(snap) as Message;
+      const updates = mutate(existing);
+      if (!updates) return existing;
 
-  private getSubCollectionRef(parentRef: any, subcollection: string): any {
-    if (typeof parentRef.collection === 'function') {
-      return parentRef.collection(subcollection);
-    }
-    return { _type: 'collection', path: `${parentRef.path}/${subcollection}`, db: this.db };
-  }
-
-  private async getDoc(ref: any): Promise<any> {
-    if (typeof ref.get === 'function') return ref.get();
-    const { getDoc } = await import('firebase/firestore');
-    return getDoc(ref);
-  }
-
-  private async getDocs(query: any): Promise<any> {
-    if (typeof query.get === 'function') return query.get();
-    const { getDocs } = await import('firebase/firestore');
-    return getDocs(query);
-  }
-
-  private async setDoc(ref: any, data: any): Promise<any> {
-    if (typeof ref.set === 'function') return ref.set(data);
-    const { setDoc } = await import('firebase/firestore');
-    return setDoc(ref, data);
-  }
-
-  private async updateDoc(ref: any, data: any): Promise<any> {
-    if (typeof ref.update === 'function') return ref.update(data);
-    const { updateDoc } = await import('firebase/firestore');
-    return updateDoc(ref, data);
-  }
-
-  private queryWhere(ref: any, field: string, op: any, val: any): any {
-    if (typeof ref.where === 'function') return ref.where(field, op, val);
-    return { ...ref, _filter: { field, op, val } };
-  }
-
-  private queryOrderBy(ref: any, field: string, direction: 'asc' | 'desc'): any {
-    if (typeof ref.orderBy === 'function') return ref.orderBy(field, direction);
-    return { ...ref, _orderBy: { field, direction } };
-  }
-
-  private onSnapshot(ref: any, onNext: (snap: any) => void, onError?: (err: Error) => void): () => void {
-    if (typeof ref.onSnapshot === 'function') {
-      return ref.onSnapshot(onNext, onError);
-    }
-    let unsub = () => {};
-    import('firebase/firestore').then(({ onSnapshot }) => {
-      unsub = onSnapshot(ref, onNext, onError);
-    }).catch(err => {
-      if (onError) onError(err);
+      const updated: Message = {
+        ...existing,
+        ...updates,
+        updatedAt: new Date().toISOString()
+      };
+      tx.set(msgRef, sanitizeDocument(updated));
+      return updated;
     });
-    return () => unsub();
   }
 
-  private snapExists(snap: any): boolean {
-    if (typeof snap.exists === 'function') return snap.exists();
-    return !!snap.exists;
+  private conversationPath(conversationId: string): string {
+    return `${this.conversationsCol}/${conversationId}`;
   }
 
-  private snapData(snap: any): any {
-    if (typeof snap.data === 'function') return snap.data();
-    return snap.data;
+  private messagesPath(conversationId: string): string {
+    return `${this.conversationPath(conversationId)}/${this.messagesSubcol}`;
   }
 
-  private snapDocs(snap: any): any[] {
-    if (Array.isArray(snap.docs)) return snap.docs;
-    return [];
+  private messagePath(conversationId: string, messageId: string): string {
+    return `${this.messagesPath(conversationId)}/${messageId}`;
   }
+}
+
+function withReaction(message: Message, reaction: { emoji: string; userId: string }) {
+  return [
+    ...(message.reactions || []),
+    { emoji: reaction.emoji, userId: reaction.userId, createdAt: new Date().toISOString() }
+  ];
+}
+
+function withoutReaction(message: Message, emoji: string, userId: string) {
+  return (message.reactions || []).filter(r => !(r.emoji === emoji && r.userId === userId));
 }

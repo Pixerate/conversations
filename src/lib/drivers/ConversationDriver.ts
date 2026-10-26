@@ -70,6 +70,16 @@ export interface ConversationDriver {
   ): Promise<Message>;
 
   /**
+   * Adds the reaction if the user has not reacted with that emoji yet, otherwise removes it.
+   * The check and the write happen atomically against the stored message.
+   */
+  toggleReaction(
+    messageId: string,
+    reaction: { emoji: string; userId: string },
+    conversationId?: string
+  ): Promise<Message>;
+
+  /**
    * Subscribes to real-time changes on a conversation document and its messages.
    * Returns an unsubscribe function.
    */

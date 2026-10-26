@@ -70,6 +70,32 @@ describe('ThreadTree', () => {
     expect(flattened).toHaveLength(2);
   });
 
+  it('keeps replies below a cycle attached to their parent', () => {
+    // Cycle: c1 <-> c2, with reply -> c1 and nested -> reply hanging off it
+    const messages: Message[] = [
+      makeMsg('c1', 'c2', '2026-10-25T10:00:00Z'),
+      makeMsg('c2', 'c1', '2026-10-25T10:01:00Z'),
+      makeMsg('reply', 'c1', '2026-10-25T10:02:00Z'),
+      makeMsg('nested', 'reply', '2026-10-25T10:03:00Z')
+    ];
+
+    const tree = ThreadTree.buildTree(messages);
+    expect(tree.map(n => n.message.id)).toEqual(['c1', 'c2']);
+
+    const c1 = ThreadTree.findNode(tree, 'c1')!;
+    expect(c1.children.map(n => n.message.id)).toEqual(['reply']);
+    expect(c1.children[0].children.map(n => n.message.id)).toEqual(['nested']);
+    expect(ThreadTree.findNode(tree, 'nested')?.depth).toBe(2);
+    expect(ThreadTree.flattenTree(tree)).toHaveLength(4);
+  });
+
+  it('breaks self-referencing messages', () => {
+    const tree = ThreadTree.buildTree([makeMsg('self', 'self')]);
+    expect(tree).toHaveLength(1);
+    expect(tree[0].message.id).toBe('self');
+    expect(tree[0].isSyntheticParent).toBe(false);
+  });
+
   it('handles missing parent messages using placeholder strategy by default', () => {
     const messages: Message[] = [
       makeMsg('child1', 'deleted_parent')

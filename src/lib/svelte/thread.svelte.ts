@@ -3,6 +3,7 @@ import type { Conversation, Message, ThreadTreeNode, GroupedReaction } from '../
 import { ThreadTree } from '../core/ThreadTree.js';
 import { reconcileOptimisticMessages, reconcileAndMergeMessages } from '../core/reconciliation.js';
 import { groupReactions } from '../core/reactions.js';
+import { buildMessageEdit } from '../core/messageEdits.js';
 
 export class ThreadStore {
   private driver: ConversationDriver;
@@ -88,7 +89,7 @@ export class ThreadStore {
   public async editMessage(messageId: string, content: string, richContent?: string) {
     return this.driver.updateMessage(
       messageId,
-      { content, richContent },
+      buildMessageEdit(content, richContent),
       this.conversationId
     );
   }
@@ -106,12 +107,7 @@ export class ThreadStore {
   }
 
   public async toggleReaction(messageId: string, emoji: string, userId: string) {
-    const msg = this.messages.find(m => m.id === messageId);
-    const hasReacted = msg?.reactions?.some(r => r.emoji === emoji && r.userId === userId);
-    if (hasReacted) {
-      return this.removeReaction(messageId, emoji, userId);
-    }
-    return this.addReaction(messageId, emoji, userId);
+    return this.driver.toggleReaction(messageId, { emoji, userId }, this.conversationId);
   }
 
   public getGroupedReactions(

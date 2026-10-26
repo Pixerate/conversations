@@ -33,14 +33,16 @@ export class ThreadTree {
         continue;
       }
 
-      // Traverse ancestors to check for loops
+      // Traverse ancestors to check for loops. Only a walk that returns to this message
+      // means it sits on a cycle; revisiting some other ancestor means the cycle lies
+      // further up, and this message stays attached to its (intact) parent.
       let currParent: string | null | undefined = msg.parentId;
       const seen = new Set<string>([msg.id]);
       let isCycle = false;
 
       while (currParent) {
         if (seen.has(currParent)) {
-          isCycle = true;
+          isCycle = currParent === msg.id;
           break;
         }
         seen.add(currParent);

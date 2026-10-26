@@ -10,6 +10,7 @@ import {
 import { ThreadTree } from './ThreadTree.js';
 import { ConversationTranscript, type TranscriptOptions } from './transcript.js';
 import { extractMentionIdsFromHtml } from './mentionTokens.js';
+import { buildMessageEdit } from './messageEdits.js';
 
 export interface ConversationManagerOptions {
   driver: ConversationDriver;
@@ -166,12 +167,11 @@ export class ConversationManager {
     content: string,
     options?: { richContent?: string; conversationId?: string }
   ): Promise<Message> {
-    const updates: Partial<Message> = { content };
-    if (options?.richContent !== undefined) {
-      updates.richContent = options.richContent;
-      updates.mentions = extractMentionIdsFromHtml(options.richContent);
-    }
-    return this.driver.updateMessage(messageId, updates, options?.conversationId);
+    return this.driver.updateMessage(
+      messageId,
+      buildMessageEdit(content, options?.richContent),
+      options?.conversationId
+    );
   }
 
   public async deleteMessage(messageId: string, conversationId?: string): Promise<Message> {
@@ -202,15 +202,7 @@ export class ConversationManager {
     userId: string,
     conversationId?: string
   ): Promise<Message> {
-    if (conversationId) {
-      const messages = await this.driver.listMessages(conversationId);
-      const msg = messages.find(m => m.id === messageId);
-      const hasReacted = msg?.reactions?.some(r => r.emoji === emoji && r.userId === userId);
-      if (hasReacted) {
-        return this.removeReaction(messageId, emoji, userId, conversationId);
-      }
-    }
-    return this.addReaction(messageId, emoji, userId, conversationId);
+    return this.driver.toggleReaction(messageId, { emoji, userId }, conversationId);
   }
 
   public async listMessages(conversationId: string): Promise<Message[]> {

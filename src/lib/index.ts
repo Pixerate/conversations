@@ -5,5 +5,6 @@ export * from './core/reconciliation.js';
 export * from './core/reactions.js';
 export * from './core/transcript.js';
 export * from './core/mentionTokens.js';
+export * from './core/messageEdits.js';
 export * from './drivers/ConversationDriver.js';
 export * from './drivers/MemoryConversationDriver.js';

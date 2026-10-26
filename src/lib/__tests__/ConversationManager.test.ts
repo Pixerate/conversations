@@ -204,6 +204,44 @@ describe('ConversationManager', () => {
     expect(removed.reactions).toHaveLength(0);
   });
 
+  it('toggleReaction removes an existing reaction even without a conversationId', async () => {
+    const driver = new MemoryConversationDriver();
+    const manager = new ConversationManager({ driver });
+    const convo = await manager.createConversation({ entity: { id: 'task_toggle', type: 'task' } });
+    const msg = await manager.postMessage({
+      conversationId: convo.id,
+      author: authorAlice,
+      content: 'Toggle me'
+    });
+    const listSpy = vi.spyOn(driver, 'listMessages');
+
+    const on = await manager.toggleReaction(msg.id, '👍', 'user_bob');
+    expect(on.reactions).toHaveLength(1);
+
+    const off = await manager.toggleReaction(msg.id, '👍', 'user_bob');
+    expect(off.reactions).toHaveLength(0);
+
+    // Toggling delegates to the driver rather than loading the whole thread
+    expect(listSpy).not.toHaveBeenCalled();
+  });
+
+  it('editMessage keeps richContent when only plain content changes', async () => {
+    const driver = new MemoryConversationDriver();
+    const manager = new ConversationManager({ driver });
+    const convo = await manager.createConversation({ entity: { id: 'task_edit', type: 'task' } });
+    const msg = await manager.postMessage({
+      conversationId: convo.id,
+      author: authorAlice,
+      content: 'Hi Bob',
+      richContent: '<p>Hi <span data-type="mention" data-id="user_bob">@Bob</span></p>'
+    });
+
+    const edited = await manager.editMessage(msg.id, 'Hi Bob!', { conversationId: convo.id });
+    expect(edited.content).toBe('Hi Bob!');
+    expect(edited.richContent).toContain('data-id="user_bob"');
+    expect(edited.mentions).toEqual(['user_bob']);
+  });
+
   it('postMessageOptimistic stages optimistic message and calls onSuccess', async () => {
     const driver = new MemoryConversationDriver();
     const manager = new ConversationManager({ driver });

@@ -151,4 +151,23 @@ describe('MemoryConversationDriver', () => {
     // Should not receive further notifications after unsubscribe
     expect(entityListener).toHaveBeenCalledTimes(3);
   });
+
+  it('toggles reactions with or without a conversationId', async () => {
+    const driver = new MemoryConversationDriver();
+    const convo = await driver.createConversation({ entity: { id: 'task_toggle', type: 'task' } });
+    const msg = await driver.postMessage({
+      conversationId: convo.id,
+      author: { type: 'user', id: 'user_1', name: 'Alice' },
+      content: 'Toggle'
+    });
+
+    const on = await driver.toggleReaction(msg.id, { emoji: '👍', userId: 'user_2' });
+    expect(on.reactions).toHaveLength(1);
+    const off = await driver.toggleReaction(msg.id, { emoji: '👍', userId: 'user_2' }, convo.id);
+    expect(off.reactions).toHaveLength(0);
+
+    await expect(
+      driver.toggleReaction('missing', { emoji: '👍', userId: 'user_2' })
+    ).rejects.toThrow('Message not found: missing');
+  });
 });

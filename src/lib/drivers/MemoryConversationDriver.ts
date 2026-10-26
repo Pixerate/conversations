@@ -5,6 +5,7 @@ import type {
   Message,
   PostMessagePayload
 } from '../types.js';
+import { hasUserReacted } from '../core/reactions.js';
 
 type Listener = (conversation: Conversation | null, messages: Message[]) => void;
 type EntityListener = (conversations: Conversation[]) => void;
@@ -222,6 +223,24 @@ export class MemoryConversationDriver implements ConversationDriver {
           r => !(r.emoji === emoji && r.userId === userId)
         );
         return this.updateMessage(messageId, { reactions: updatedReactions }, convoId);
+      }
+    }
+    throw new Error(`Message not found: ${messageId}`);
+  }
+
+  public async toggleReaction(
+    messageId: string,
+    reaction: { emoji: string; userId: string },
+    conversationId?: string
+  ): Promise<Message> {
+    const targetConvoIds = conversationId ? [conversationId] : Array.from(this.messages.keys());
+
+    for (const convoId of targetConvoIds) {
+      const msg = this.messages.get(convoId)?.find(m => m.id === messageId);
+      if (msg) {
+        return hasUserReacted(msg.reactions, reaction.emoji, reaction.userId)
+          ? this.removeReaction(messageId, reaction.emoji, reaction.userId, convoId)
+          : this.addReaction(messageId, reaction, convoId);
       }
     }
     throw new Error(`Message not found: ${messageId}`);
