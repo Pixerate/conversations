@@ -82,4 +82,4 @@ If a parent comment is deleted or missing from the current query slice, replies 
 ### Subcollection Scaling
 Firestore messages are organized into subcollections:
 `conversations/{id}/messages/{messageId}`.
-Summary fields (`messageCount`, `lastMessageAt`) are maintained on the parent document using Firestore atomic increments, keeping entity queries fast and cost-effective.
+Summary fields (`messageCount`, `lastMessageAt`) are maintained on the parent document inside the same transaction that writes each message, keeping entity queries fast and cost-effective.

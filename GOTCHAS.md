@@ -17,17 +17,9 @@ Optional conversation/message properties (such as `parentId`, `richContent`, `up
 
 ### ✅ Solution
 
-- Always sanitize documents before persisting to Firestore by stripping keys with `undefined` values.
-- In `FirestoreConversationDriver`, iterate through record entries and only include defined values:
-  ```ts
-  const docData: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(record)) {
-    if (value !== undefined) {
-      docData[key] = value;
-    }
-  }
-  await setDoc(docRef, docData);
-  ```
+- Always sanitize documents before persisting to Firestore by stripping `undefined` values.
+- The check is **recursive**: Firestore rejects `undefined` at any depth, so a top-level-only strip still fails on e.g. `entity.title`, `author.avatarUrl`, or `metadata.*`.
+- `sanitizeDocument` in `FirestoreConversationDriver` recurses into plain objects and arrays (dropping `undefined` array items) and passes non-plain values (Timestamps, `FieldValue` sentinels) through untouched.
 
 ---
 
@@ -41,6 +33,7 @@ If malicious or malformed message data introduces a cycle (e.g., Message A has `
 
 - In `ThreadTree.buildTree()`, maintain an active `visited` or `ancestors` Set during tree traversal.
 - If a cycle is detected, break the cycle by treating the cyclic child as an orphan and attaching it to the root level with a warning flag, preventing recursion crashes.
+- Only messages **on** the cycle are promoted: the ancestor walk counts as a cycle only when it returns to the message it started from. A reply hanging below a cycle (C → A, with A ↔ B) revisits A rather than C, and must stay attached to A, which is now a root.
 
 ---
 
@@ -69,7 +62,7 @@ Querying messages across subcollections (e.g. `collectionGroup('messages')`) req
 
 - Keep lightweight summary metadata directly on the parent conversation document:
   `messageCount`, `lastMessageAt`, `participantIds`, `status`.
-- Atomic increments: use `FieldValue.increment(1)` when writing a new message to `conversations/{id}/messages/{messageId}` to update `messageCount` on the parent without extra reads.
+- Keep the summary consistent with concurrent writers: never read the conversation, add 1 and write it back outside a transaction (two posts at once both write the same count). `FirestoreConversationDriver.postMessage` writes the message and the summary in one transaction, which retries on contention. See [Gotcha 7](#7-firestore-read-modify-write-must-run-in-a-transaction).
 
 ---
 
@@ -103,3 +96,46 @@ When reconciling optimistic messages against real-time server snapshots in Svelt
   ```
 - Similarly, in `reconcileAndMergeMessages`, if `optimisticMessages.length === 0`, return `serverMessages` directly to preserve referential equality.
 
+---
+
+## 7. Firestore Read-Modify-Write Must Run in a Transaction
+
+### ⚠️ Gotcha
+
+Reading a document, changing an array or counter in memory, then `set`ting the whole document back loses concurrent writes: two users reacting at the same moment both read `reactions: []`, and the second write erases the first. The same applies to edits racing reactions, and to `messageCount`/`participantIds`.
+
+### ✅ Solution
+
+- Wrap every read-modify-write in `runTransaction` (Admin: `db.runTransaction(fn)`; modular: `runTransaction(db, fn)`). Both expose the same `tx.get` / `tx.set` / `tx.update` shape.
+- Do all `tx.get` calls before any write (the Admin SDK enforces this).
+- The transaction callback may run more than once on contention, so it must be pure: compute updates only from what it read (see `mutateMessage`).
+- Client-SDK transactions need a server round trip and fail while offline.
+- Tests: `src/lib/__tests__/fakes/fakeFirestore.ts` yields between reads and retries stale transactions, so `Promise.all` of concurrent writes reproduces lost updates.
+
+---
+
+## 8. Modular Firestore SDK Needs Its Own References
+
+### ⚠️ Gotcha
+
+The modular SDK (`firebase/firestore`) only accepts references built by its own `doc()`, `collection()` and `query(..., where(), orderBy())` functions. Passing hand-built objects such as `{ path, db }` to `getDoc`/`onSnapshot` throws, and filters stored on them are silently ignored. Mocks shaped like the Admin SDK never exercise this path.
+
+### ✅ Solution
+
+- `FirestoreConversationDriver` picks an adapter once (Admin when `db.collection` is a function, otherwise modular via a lazy `import('firebase/firestore')`) and builds every ref and query through it from path strings.
+- Driver tests run against both flavours: `createAdminDb()` and `createModularDb()` with `vi.mock('firebase/firestore')` mapped to the same fake store.
+
+---
+
+## 9. Snapshot Listeners That Attach Asynchronously
+
+### ⚠️ Gotcha
+
+When a listener can only be attached after an async step (such as the lazy SDK import), an unsubscribe function that captures "the current unsub" calls a no-op if it runs first, and the listener attaches afterwards with nothing able to remove it. React StrictMode's mount/unmount/mount triggers this on every page.
+
+Separately, a conversation subscription built from two listeners (conversation document + messages query) can emit the conversation before the messages arrive, briefly rendering an empty thread.
+
+### ✅ Solution
+
+- Set a `cancelled` flag on unsubscribe and skip attaching once the async step resolves (`FirestoreConversationDriver.listen`).
+- Hold back the first `onUpdate` until both the conversation and messages listeners have delivered at least once.
