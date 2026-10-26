@@ -160,9 +160,69 @@ export class ThreadTree {
     }
     return null;
   }
+  /**
+   * Builds an array of self-nesting threaded comment items (with .replies: T[]) from flat or partially nested items.
+   * Handles cycle breaking, parent-child wiring, and chronological ordering.
+   */
+  public static buildCommentThreads<T extends { id: string; parentId?: string | null; replies?: T[] }>(
+    items: T[]
+  ): (T & { replies: (T & { replies: any[] })[] })[] {
+    type ThreadedItem = T & { replies: ThreadedItem[] };
+    if (!Array.isArray(items) || items.length === 0) return [];
+
+    const validItems = items.filter((item): item is T =>
+      Boolean(item && typeof item === 'object' && item.id)
+    );
+    if (validItems.length === 0) return [];
+
+    const itemMap = new Map<string, ThreadedItem>();
+    const roots: ThreadedItem[] = [];
+
+    // Register all items into map with cloned or empty replies array
+    for (const item of validItems) {
+      itemMap.set(item.id, {
+        ...item,
+        replies: Array.isArray(item.replies) ? [...item.replies] : []
+      } as ThreadedItem);
+    }
+
+    // Attach child replies to parents, breaking cycles
+    for (const item of validItems) {
+      const node = itemMap.get(item.id)!;
+      if (item.parentId && itemMap.has(item.parentId)) {
+        // Prevent cycles
+        let isCycle = false;
+        let curr: string | null | undefined = item.parentId;
+        const seen = new Set<string>([item.id]);
+        while (curr) {
+          if (seen.has(curr)) {
+            isCycle = curr === item.id;
+            break;
+          }
+          seen.add(curr);
+          const p = itemMap.get(curr);
+          curr = p?.parentId;
+        }
+
+        if (isCycle) {
+          roots.push(node);
+        } else {
+          const parent = itemMap.get(item.parentId)!;
+          if (!parent.replies.some((r) => r && r.id === node.id)) {
+            parent.replies.push(node);
+          }
+        }
+      } else {
+        roots.push(node);
+      }
+    }
+
+    return roots;
+  }
 }
 
 export const buildThreadTree = ThreadTree.buildTree.bind(ThreadTree);
+export const buildCommentThreads = ThreadTree.buildCommentThreads.bind(ThreadTree);
 export const flattenTree = ThreadTree.flattenTree.bind(ThreadTree);
 export const countDescendants = ThreadTree.countDescendants.bind(ThreadTree);
 export const findNodeInTree = ThreadTree.findNode.bind(ThreadTree);

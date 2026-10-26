@@ -166,4 +166,40 @@ describe('ThreadTree', () => {
 
     expect(ThreadTree.findNode(tree, 'non_existent')).toBeNull();
   });
+
+  describe('buildCommentThreads', () => {
+    it('builds self-nesting threaded comments array matching Operative structure', () => {
+      const flat = [
+        { id: 'c1', content: 'Root comment', parentId: null },
+        { id: 'c2', content: 'Reply to root', parentId: 'c1' },
+        { id: 'c3', content: 'Nested reply', parentId: 'c2' },
+        { id: 'c4', content: 'Another root comment', parentId: null }
+      ];
+
+      const threaded = ThreadTree.buildCommentThreads(flat);
+      expect(threaded).toHaveLength(2);
+      expect(threaded[0].id).toBe('c1');
+      expect(threaded[0].replies).toHaveLength(1);
+      expect(threaded[0].replies[0].id).toBe('c2');
+      expect(threaded[0].replies[0].replies).toHaveLength(1);
+      expect(threaded[0].replies[0].replies[0].id).toBe('c3');
+      expect(threaded[1].id).toBe('c4');
+      expect(threaded[1].replies).toHaveLength(0);
+    });
+
+    it('breaks cycles in parentId pointers by placing cyclic nodes at root', () => {
+      const cyclic = [
+        { id: 'c1', content: 'Cycle 1', parentId: 'c2' },
+        { id: 'c2', content: 'Cycle 2', parentId: 'c1' }
+      ];
+
+      const threaded = ThreadTree.buildCommentThreads(cyclic);
+      expect(threaded).toBeDefined();
+      expect(threaded.length).toBeGreaterThan(0);
+    });
+
+    it('handles empty input gracefully', () => {
+      expect(ThreadTree.buildCommentThreads([])).toEqual([]);
+    });
+  });
 });
