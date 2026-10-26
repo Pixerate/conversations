@@ -108,6 +108,25 @@ describe('reconciliation', () => {
     expect(merged[1].id).toBe('temp_2');
   });
 
+  it('reconciles messages with flat authorId property', () => {
+    const optFlat = {
+      id: 'opt_flat_1',
+      authorId: 'user_alex',
+      content: 'Flat author comment',
+      createdAt: '2026-10-25T12:00:00Z',
+      parentId: null
+    };
+    const srvFlat = {
+      id: 'srv_flat_1',
+      authorId: 'user_alex',
+      content: 'Flat author comment',
+      createdAt: '2026-10-25T12:00:02Z',
+      parentId: null
+    };
+    const result = reconcileOptimisticMessages([optFlat], [srvFlat]);
+    expect(result).toHaveLength(0);
+  });
+
   it('handles empty optimistic or server lists gracefully', () => {
     const opt = makeMsg('temp_1', 'Pending');
     expect(reconcileOptimisticMessages([], [opt])).toEqual([]);

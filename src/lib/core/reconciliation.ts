@@ -1,24 +1,25 @@
 import type { Message } from '../types.js';
 
-interface MessageLike {
+export interface MessageLike {
   id: string;
   content: string;
   createdAt: string;
   author?: { id?: string };
+  authorId?: string;
   parentId?: string | null;
   children?: MessageLike[];
   replies?: MessageLike[];
 }
 
-function matchesMessage(opt: Message, server: MessageLike, windowMs: number): boolean {
+function matchesMessage(opt: MessageLike, server: MessageLike, windowMs: number): boolean {
   // 1. Direct ID match
   if (server.id === opt.id) {
     return true;
   }
 
   // 2. Fuzzy match: same author, same content, same parent, within time window
-  const optAuthorId = opt.author?.id;
-  const serverAuthorId = server.author?.id;
+  const optAuthorId = opt.author?.id ?? opt.authorId;
+  const serverAuthorId = server.author?.id ?? server.authorId;
 
   if (optAuthorId && serverAuthorId && optAuthorId === serverAuthorId) {
     if (opt.content === server.content) {
@@ -59,11 +60,11 @@ function matchesMessage(opt: Message, server: MessageLike, windowMs: number): bo
  * Returns the remaining unreconciled optimistic messages.
  * Preserves input array reference equality if no messages were reconciled.
  */
-export function reconcileOptimisticMessages(
-  optimisticList: Message[],
+export function reconcileOptimisticMessages<T extends MessageLike = Message>(
+  optimisticList: T[],
   serverList: MessageLike[],
   windowMs: number = 10_000
-): Message[] {
+): T[] {
   if (!optimisticList || optimisticList.length === 0) {
     return [];
   }
@@ -87,11 +88,11 @@ export function reconcileOptimisticMessages(
 /**
  * Combines server messages with remaining unreconciled optimistic messages.
  */
-export function reconcileAndMergeMessages(
-  optimisticList: Message[],
-  serverList: Message[],
+export function reconcileAndMergeMessages<T extends MessageLike = Message>(
+  optimisticList: T[],
+  serverList: T[],
   windowMs: number = 10_000
-): Message[] {
+): T[] {
   const remainingOptimistic = reconcileOptimisticMessages(optimisticList, serverList, windowMs);
   if (remainingOptimistic.length === 0) {
     return serverList;
