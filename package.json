@@ -1,0 +1,118 @@
+{
+  "name": "@pixerate/conversations",
+  "version": "0.1.0",
+  "description": "UI-agnostic conversation, comment threading, and entity discussion library for Svelte 5, React 19, and Node.js on Google Cloud Platform",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "svelte": "./dist/index.js",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./server": {
+      "types": "./dist/server.d.ts",
+      "default": "./dist/server.js"
+    },
+    "./gcp": {
+      "types": "./dist/gcp.d.ts",
+      "default": "./dist/gcp.js"
+    },
+    "./svelte": {
+      "types": "./dist/svelte.d.ts",
+      "svelte": "./dist/svelte.js",
+      "default": "./dist/svelte.js"
+    },
+    "./react": {
+      "types": "./dist/react.d.ts",
+      "default": "./dist/react.js"
+    }
+  },
+  "files": [
+    "dist",
+    "!dist/__tests__",
+    "README.md",
+    "CHANGELOG.md",
+    "docs"
+  ],
+  "scripts": {
+    "dev": "vite dev",
+    "build": "svelte-kit sync && svelte-package && node -e \"require('node:fs').rmSync('dist/__tests__', { recursive: true, force: true })\"",
+    "prepare": "npm run build",
+    "prepublishOnly": "npm run build",
+    "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "changeset": "changeset",
+    "changeset:status": "changeset status",
+    "version-packages": "changeset version"
+  },
+  "keywords": [
+    "conversations",
+    "threads",
+    "comments",
+    "collaboration",
+    "gcp",
+    "firestore",
+    "svelte5",
+    "react19"
+  ],
+  "author": "Pixerate",
+  "license": "UNLICENSED",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Pixerate/conversations.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Pixerate/conversations/issues"
+  },
+  "homepage": "https://github.com/Pixerate/conversations#readme",
+  "dependencies": {
+    "@pixerate/schemas": "^1.26.0",
+    "zod": "^3.24.2"
+  },
+  "peerDependencies": {
+    "firebase": "^10.0.0 || ^11.0.0 || ^12.0.0",
+    "firebase-admin": "^12.0.0 || ^13.0.0 || ^14.0.0",
+    "react": "^18.0.0 || ^19.0.0",
+    "svelte": "^5.0.0"
+  },
+  "peerDependenciesMeta": {
+    "firebase": {
+      "optional": true
+    },
+    "firebase-admin": {
+      "optional": true
+    },
+    "react": {
+      "optional": true
+    },
+    "svelte": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@changesets/cli": "^3.0.3",
+    "@sveltejs/adapter-auto": "^4.0.0",
+    "@sveltejs/kit": "^2.21.1",
+    "@sveltejs/package": "^2.3.10",
+    "@sveltejs/vite-plugin-svelte": "^5.0.3",
+    "@types/node": "^24.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.3.0",
+    "firebase": "^12.15.0",
+    "firebase-admin": "^14.5.0",
+    "happy-dom": "^20.14.6",
+    "react": "^19.0.0",
+    "react-dom": "^19.3.0",
+    "svelte": "^5.57.2",
+    "svelte-check": "^4.1.5",
+    "typescript": "^5.7.3",
+    "vite": "^6.3.5",
+    "vitest": "^4.1.9"
+  }
+}
