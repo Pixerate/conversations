@@ -16,6 +16,19 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
+      - name: Check for Changesets
+        if: github.event_name == 'pull_request' && !contains(github.event.pull_request.labels.*.name, 'skip-changeset') && !contains(github.event.pull_request.title, '[skip changeset]') && github.actor != 'dependabot[bot]'
+        run: |
+          CHANGESETS=$(find .changeset -name "*.md" ! -name "README.md" | wc -l)
+          if [ "$CHANGESETS" -eq "0" ]; then
+            echo "::error title=Missing Changeset::No changeset found in .changeset/. Please run 'npm run changeset' and include the generated markdown file in your PR."
+            echo "If this PR should be exempt from versioning, add the 'skip-changeset' label."
+            exit 1
+          else
+            echo "Pending changeset found: $CHANGESETS"
+          fi
+
+
       - name: Setup Node.js 24
         uses: actions/setup-node@v4
         with:
@@ -33,3 +46,4 @@ jobs:
 
       - name: Build Package
         run: npm run build
+

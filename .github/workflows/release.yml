@@ -20,20 +20,6 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Setup Node.js 24
-        uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: 'npm'
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Configure Git
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-
       - name: Check for pending changesets
         id: changeset_check
         run: |
@@ -44,6 +30,23 @@ jobs:
           else
             echo "No pending changesets found. Skipping release."
           fi
+
+      - name: Setup Node.js 24
+        if: steps.changeset_check.outputs.count > 0 || github.event_name == 'workflow_dispatch'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: 'npm'
+
+      - name: Install dependencies
+        if: steps.changeset_check.outputs.count > 0 || github.event_name == 'workflow_dispatch'
+        run: npm ci
+
+      - name: Configure Git
+        if: steps.changeset_check.outputs.count > 0 || github.event_name == 'workflow_dispatch'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
 
       - name: Version packages & update CHANGELOG.md files
         if: steps.changeset_check.outputs.count > 0 || github.event_name == 'workflow_dispatch'
@@ -64,3 +67,4 @@ jobs:
           git commit -m "chore(release): version packages and update changelogs [skip ci]" || echo "No changes to commit"
           npx changeset tag
           git push origin HEAD --tags || echo "Failed to push tags"
+
