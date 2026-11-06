@@ -3,8 +3,30 @@ import type { ConversationDriver } from '../drivers/ConversationDriver.js';
 import type { Conversation, Message, ThreadTreeNode, GroupedReaction } from '../types.js';
 import { ThreadTree } from '../core/ThreadTree.js';
 import { reconcileOptimisticMessages, reconcileAndMergeMessages } from '../core/reconciliation.js';
-import { groupReactions } from '../core/reactions.js';
+import { groupReactions, normalizeReactionInput, type ReactionInput } from '../core/reactions.js';
 import { buildMessageEdit } from '../core/messageEdits.js';
+import {
+  extractMessageStickers,
+  resolveMessageStickers,
+  resolveSticker,
+  type ResolvedSticker,
+  type ResolveStickerOptions,
+  type StickerProviderInput
+} from '../core/stickers.js';
+
+export interface UseThreadOptions {
+  stickerProvider?: StickerProviderInput;
+}
+
+function unwrapStickerProvider(
+  options?: UseThreadOptions | StickerProviderInput
+): StickerProviderInput | undefined {
+  if (!options) return undefined;
+  if (Array.isArray(options) || typeof (options as any).load === 'function') {
+    return options as StickerProviderInput;
+  }
+  return (options as UseThreadOptions).stickerProvider;
+}
 
 export interface ThreadState {
   conversation: Conversation | null;
@@ -101,6 +123,7 @@ class ThreadStoreSubscriber {
     richContent?: string
   ): Promise<Message> => {
     const tempId = `temp_msg_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    const stickers = extractMessageStickers(content, richContent);
     const optimisticMsg: Message = {
       id: tempId,
       conversationId: this.conversationId,
@@ -110,6 +133,7 @@ class ThreadStoreSubscriber {
       parentId: parentId || null,
       status: 'pending',
       mentions: [],
+      ...(stickers.length > 0 ? { stickers } : {}),
       attachments: [],
       reactions: [],
       createdAt: new Date().toISOString()
@@ -130,7 +154,8 @@ class ThreadStoreSubscriber {
         author,
         content,
         richContent,
-        parentId
+        parentId,
+        ...(stickers.length > 0 ? { stickers } : {})
       });
       return confirmed;
     } catch (err: any) {
@@ -159,16 +184,34 @@ class ThreadStoreSubscriber {
     return this.driver.deleteMessage(messageId, this.conversationId);
   };
 
-  public addReaction = async (messageId: string, emoji: string, userId: string) => {
-    return this.driver.addReaction(messageId, { emoji, userId }, this.conversationId);
+  public addReaction = async (
+    messageId: string,
+    emojiOrReaction: ReactionInput,
+    userId: string,
+    provider?: StickerProviderInput
+  ) => {
+    const normalized = normalizeReactionInput(emojiOrReaction, provider);
+    return this.driver.addReaction(messageId, { ...normalized, userId }, this.conversationId);
   };
 
-  public removeReaction = async (messageId: string, emoji: string, userId: string) => {
-    return this.driver.removeReaction(messageId, emoji, userId, this.conversationId);
+  public removeReaction = async (
+    messageId: string,
+    emojiOrReaction: ReactionInput,
+    userId: string,
+    provider?: StickerProviderInput
+  ) => {
+    const normalized = normalizeReactionInput(emojiOrReaction, provider);
+    return this.driver.removeReaction(messageId, normalized.emoji, userId, this.conversationId);
   };
 
-  public toggleReaction = async (messageId: string, emoji: string, userId: string) => {
-    return this.driver.toggleReaction(messageId, { emoji, userId }, this.conversationId);
+  public toggleReaction = async (
+    messageId: string,
+    emojiOrReaction: ReactionInput,
+    userId: string,
+    provider?: StickerProviderInput
+  ) => {
+    const normalized = normalizeReactionInput(emojiOrReaction, provider);
+    return this.driver.toggleReaction(messageId, { ...normalized, userId }, this.conversationId);
   };
 
   public resolve = async (resolvedBy?: string) => {
@@ -199,7 +242,13 @@ function threadsFor(driver: ConversationDriver): Map<string, ThreadStoreSubscrib
 /**
  * React 19 hook for reactive, flicker-free conversation thread synchronization.
  */
-export function useThread(driver: ConversationDriver, conversationId: string) {
+export function useThread(
+  driver: ConversationDriver,
+  conversationId: string,
+  options?: UseThreadOptions | StickerProviderInput
+) {
+  const stickerProvider = unwrapStickerProvider(options);
+
   const subscriber = useMemo(() => {
     const threads = threadsFor(driver);
     let sub = threads.get(conversationId);
@@ -238,24 +287,72 @@ export function useThread(driver: ConversationDriver, conversationId: string) {
   );
 
   const addReaction = useCallback(
-    (messageId: string, emoji: string, userId: string) => {
-      return subscriber.addReaction(messageId, emoji, userId);
+    (messageId: string, emojiOrReaction: ReactionInput, userId: string) => {
+      return subscriber.addReaction(messageId, emojiOrReaction, userId, stickerProvider);
     },
-    [subscriber]
+    [subscriber, stickerProvider]
   );
 
   const removeReaction = useCallback(
-    (messageId: string, emoji: string, userId: string) => {
-      return subscriber.removeReaction(messageId, emoji, userId);
+    (messageId: string, emojiOrReaction: ReactionInput, userId: string) => {
+      return subscriber.removeReaction(messageId, emojiOrReaction, userId, stickerProvider);
     },
-    [subscriber]
+    [subscriber, stickerProvider]
   );
 
   const toggleReaction = useCallback(
-    (messageId: string, emoji: string, userId: string) => {
-      return subscriber.toggleReaction(messageId, emoji, userId);
+    (messageId: string, emojiOrReaction: ReactionInput, userId: string) => {
+      return subscriber.toggleReaction(messageId, emojiOrReaction, userId, stickerProvider);
     },
-    [subscriber]
+    [subscriber, stickerProvider]
+  );
+
+  const addStickerReaction = useCallback(
+    (messageId: string, sticker: string, userId: string) => {
+      return subscriber.addReaction(messageId, { sticker }, userId, stickerProvider);
+    },
+    [subscriber, stickerProvider]
+  );
+
+  const removeStickerReaction = useCallback(
+    (messageId: string, sticker: string, userId: string) => {
+      return subscriber.removeReaction(messageId, { sticker }, userId, stickerProvider);
+    },
+    [subscriber, stickerProvider]
+  );
+
+  const toggleStickerReaction = useCallback(
+    (messageId: string, sticker: string, userId: string) => {
+      return subscriber.toggleReaction(messageId, { sticker }, userId, stickerProvider);
+    },
+    [subscriber, stickerProvider]
+  );
+
+  const resolveStickerForThread = useCallback(
+    async (
+      tokenOrRef: string,
+      resolveOptions?: ResolveStickerOptions
+    ): Promise<ResolvedSticker | undefined> => {
+      if (!stickerProvider) return undefined;
+      return resolveSticker(stickerProvider, tokenOrRef, resolveOptions);
+    },
+    [stickerProvider]
+  );
+
+  const resolveMessageStickersForThread = useCallback(
+    async (
+      messageOrId: string | Pick<Message, 'content' | 'richContent' | 'stickers' | 'reactions'>,
+      resolveOptions?: ResolveStickerOptions
+    ): Promise<Map<string, ResolvedSticker>> => {
+      if (!stickerProvider) return new Map();
+      const msg =
+        typeof messageOrId === 'string'
+          ? state.messages.find(m => m.id === messageOrId)
+          : messageOrId;
+      if (!msg) return new Map();
+      return resolveMessageStickers(stickerProvider, msg, resolveOptions);
+    },
+    [stickerProvider, state.messages]
   );
 
   const getGroupedReactions = useCallback(
@@ -279,6 +376,7 @@ export function useThread(driver: ConversationDriver, conversationId: string) {
 
   return {
     ...state,
+    stickerProvider,
     totalCount: state.messages.length,
     isResolved: state.conversation?.status === 'resolved',
     postMessage,
@@ -287,6 +385,11 @@ export function useThread(driver: ConversationDriver, conversationId: string) {
     addReaction,
     removeReaction,
     toggleReaction,
+    addStickerReaction,
+    removeStickerReaction,
+    toggleStickerReaction,
+    resolveSticker: resolveStickerForThread,
+    resolveMessageStickers: resolveMessageStickersForThread,
     getGroupedReactions,
     resolve,
     reopen

@@ -5,7 +5,7 @@ import type {
   Message,
   PostMessagePayload
 } from '../types.js';
-import { hasUserReacted } from '../core/reactions.js';
+import { hasUserReacted, normalizeReactionInput } from '../core/reactions.js';
 
 export interface FirestoreConversationDriverOptions {
   /**
@@ -243,6 +243,7 @@ export class FirestoreConversationDriver implements ConversationDriver {
         parentId: payload.parentId || null,
         status: 'sent',
         mentions: payload.mentions || [],
+        ...(payload.stickers ? { stickers: payload.stickers } : {}),
         attachments: payload.attachments || [],
         reactions: payload.reactions || [],
         metadata: payload.metadata || {},
@@ -304,16 +305,17 @@ export class FirestoreConversationDriver implements ConversationDriver {
 
   public async addReaction(
     messageId: string,
-    reaction: { emoji: string; userId: string },
+    reaction: { emoji: string; sticker?: string; userId: string },
     conversationId?: string
   ): Promise<Message> {
     if (!conversationId) {
       throw new Error('addReaction on FirestoreDriver requires conversationId.');
     }
+    const normalized = normalizeReactionInput(reaction);
     return this.mutateMessage(messageId, conversationId, existing =>
-      hasUserReacted(existing.reactions, reaction.emoji, reaction.userId)
+      hasUserReacted(existing.reactions, normalized, reaction.userId)
         ? null
-        : { reactions: withReaction(existing, reaction) }
+        : { reactions: withReaction(existing, { ...normalized, userId: reaction.userId }) }
     );
   }
 
@@ -333,16 +335,17 @@ export class FirestoreConversationDriver implements ConversationDriver {
 
   public async toggleReaction(
     messageId: string,
-    reaction: { emoji: string; userId: string },
+    reaction: { emoji: string; sticker?: string; userId: string },
     conversationId?: string
   ): Promise<Message> {
     if (!conversationId) {
       throw new Error('toggleReaction on FirestoreDriver requires conversationId.');
     }
+    const normalized = normalizeReactionInput(reaction);
     return this.mutateMessage(messageId, conversationId, existing => ({
-      reactions: hasUserReacted(existing.reactions, reaction.emoji, reaction.userId)
-        ? withoutReaction(existing, reaction.emoji, reaction.userId)
-        : withReaction(existing, reaction)
+      reactions: hasUserReacted(existing.reactions, normalized, reaction.userId)
+        ? withoutReaction(existing, normalized.emoji, reaction.userId)
+        : withReaction(existing, { ...normalized, userId: reaction.userId })
     }));
   }
 
@@ -485,13 +488,21 @@ export class FirestoreConversationDriver implements ConversationDriver {
   }
 }
 
-function withReaction(message: Message, reaction: { emoji: string; userId: string }) {
+function withReaction(
+  message: Message,
+  reaction: { emoji: string; sticker?: string; userId: string }
+) {
   return [
     ...(message.reactions || []),
-    { emoji: reaction.emoji, userId: reaction.userId, createdAt: new Date().toISOString() }
+    {
+      emoji: reaction.emoji,
+      ...(reaction.sticker ? { sticker: reaction.sticker } : {}),
+      userId: reaction.userId,
+      createdAt: new Date().toISOString()
+    }
   ];
 }
 
 function withoutReaction(message: Message, emoji: string, userId: string) {
-  return (message.reactions || []).filter(r => !(r.emoji === emoji && r.userId === userId));
+  return (message.reactions || []).filter(r => !hasUserReacted([r], emoji, userId));
 }

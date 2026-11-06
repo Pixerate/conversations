@@ -115,4 +115,33 @@ describe('useThread (React)', () => {
     });
     expect(result.current?.messages[0].reactions).toHaveLength(0);
   });
+
+  it('supports sticker reactions via toggleStickerReaction and getGroupedReactions', async () => {
+    const driver = new MemoryConversationDriver();
+    const msg = await seed(driver, 'convo_sticker_react', 'React with a sticker');
+    const { result } = renderThread(driver, 'convo_sticker_react');
+
+    await act(async () => {
+      await result.current!.toggleStickerReaction(msg.id, 'pixerate-heart', 'agent_1');
+    });
+    expect(result.current?.messages[0].reactions).toHaveLength(1);
+    expect(result.current?.messages[0].reactions[0]).toMatchObject({
+      emoji: ':pixerate-heart:',
+      sticker: 'pixerate-heart',
+      userId: 'agent_1'
+    });
+
+    const grouped = result.current!.getGroupedReactions(msg.id, 'agent_1');
+    expect(grouped[0]).toMatchObject({
+      emoji: ':pixerate-heart:',
+      sticker: 'pixerate-heart',
+      count: 1,
+      hasReacted: true
+    });
+
+    await act(async () => {
+      await result.current!.toggleStickerReaction(msg.id, 'pixerate-heart', 'agent_1');
+    });
+    expect(result.current?.messages[0].reactions).toHaveLength(0);
+  });
 });

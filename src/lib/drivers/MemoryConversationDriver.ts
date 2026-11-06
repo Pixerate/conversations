@@ -5,7 +5,7 @@ import type {
   Message,
   PostMessagePayload
 } from '../types.js';
-import { hasUserReacted } from '../core/reactions.js';
+import { hasUserReacted, normalizeReactionInput } from '../core/reactions.js';
 
 type Listener = (conversation: Conversation | null, messages: Message[]) => void;
 type EntityListener = (conversations: Conversation[]) => void;
@@ -101,6 +101,7 @@ export class MemoryConversationDriver implements ConversationDriver {
       parentId: payload.parentId || null,
       status: 'sent',
       mentions: payload.mentions || [],
+      ...(payload.stickers ? { stickers: payload.stickers } : {}),
       attachments: payload.attachments || [],
       reactions: payload.reactions || [],
       metadata: payload.metadata || {},
@@ -174,10 +175,11 @@ export class MemoryConversationDriver implements ConversationDriver {
 
   public async addReaction(
     messageId: string,
-    reaction: { emoji: string; userId: string },
+    reaction: { emoji: string; sticker?: string; userId: string },
     conversationId?: string
   ): Promise<Message> {
     const targetConvoIds = conversationId ? [conversationId] : Array.from(this.messages.keys());
+    const normalized = normalizeReactionInput(reaction);
 
     for (const convoId of targetConvoIds) {
       const list = this.messages.get(convoId);
@@ -185,16 +187,14 @@ export class MemoryConversationDriver implements ConversationDriver {
       const msg = list.find(m => m.id === messageId);
       if (msg) {
         const currentReactions = msg.reactions || [];
-        const alreadyExists = currentReactions.some(
-          r => r.emoji === reaction.emoji && r.userId === reaction.userId
-        );
-        if (alreadyExists) {
+        if (hasUserReacted(currentReactions, normalized, reaction.userId)) {
           return msg;
         }
         const updatedReactions = [
           ...currentReactions,
           {
-            emoji: reaction.emoji,
+            emoji: normalized.emoji,
+            ...(normalized.sticker ? { sticker: normalized.sticker } : {}),
             userId: reaction.userId,
             createdAt: new Date().toISOString()
           }
@@ -220,7 +220,7 @@ export class MemoryConversationDriver implements ConversationDriver {
       if (msg) {
         const currentReactions = msg.reactions || [];
         const updatedReactions = currentReactions.filter(
-          r => !(r.emoji === emoji && r.userId === userId)
+          r => !hasUserReacted([r], emoji, userId)
         );
         return this.updateMessage(messageId, { reactions: updatedReactions }, convoId);
       }
@@ -230,17 +230,18 @@ export class MemoryConversationDriver implements ConversationDriver {
 
   public async toggleReaction(
     messageId: string,
-    reaction: { emoji: string; userId: string },
+    reaction: { emoji: string; sticker?: string; userId: string },
     conversationId?: string
   ): Promise<Message> {
     const targetConvoIds = conversationId ? [conversationId] : Array.from(this.messages.keys());
+    const normalized = normalizeReactionInput(reaction);
 
     for (const convoId of targetConvoIds) {
       const msg = this.messages.get(convoId)?.find(m => m.id === messageId);
       if (msg) {
-        return hasUserReacted(msg.reactions, reaction.emoji, reaction.userId)
-          ? this.removeReaction(messageId, reaction.emoji, reaction.userId, convoId)
-          : this.addReaction(messageId, reaction, convoId);
+        return hasUserReacted(msg.reactions, normalized, reaction.userId)
+          ? this.removeReaction(messageId, normalized.emoji, reaction.userId, convoId)
+          : this.addReaction(messageId, { ...normalized, userId: reaction.userId }, convoId);
       }
     }
     throw new Error(`Message not found: ${messageId}`);
