@@ -139,3 +139,20 @@ Separately, a conversation subscription built from two listeners (conversation d
 
 - Set a `cancelled` flag on unsubscribe and skip attaching once the async step resolves (`FirestoreConversationDriver.listen`).
 - Hold back the first `onUpdate` until both the conversation and messages listeners have delivered at least once.
+
+---
+
+## 10. Dash-Namespaced Sticker Shortcodes with Hyphenated Pack IDs
+
+### ⚠️ Gotcha
+
+Message sticker shortcodes use bare `:id:` when a single sticker pack is active (e.g. `:heart:` or `:slop-bucket:`) and dash-namespaced `:pack-id:` when multiple packs are provided (e.g. `:pixerate-heart:` or `:slop-machine-slop-bucket:`). Because both the pack ID (`slop-machine`) and the sticker ID (`slop-bucket`) can contain hyphens, splitting on the first `-` produces an invalid pack ID (`slop`).
+
+Separately, `@pixerate/stickers` types `StickerDescription.variants` as `{ id: string; name: string }[]` whereas `@pixerate/editor/stickers` types it as `StickerVariant[]` (`('light' | 'dark')[]`).
+
+### ✅ Solution
+
+- When resolving against an array of `StickerProvider`s, sort providers by descending `id.length` before matching `${provider.id}-` prefixes so longer hyphenated pack IDs (`slop-machine`) always match first.
+- When resolving a dash-namespaced shortcode against a pre-combined `namespaced: true` provider that expects `provider:id` refs, test candidate `-` → `:` split positions from longest prefix to shortest.
+- A sticker id that begins with its own pack id (`logo` vs `pixerate-logo` in pack `pixerate`) is ambiguous in single-pack mode: `formatStickerShortcode` strips the prefix so `:pixerate-heart:` and `:heart:` stay one reaction. Avoid pack-prefixed sticker ids.
+- Type `StickerDescription.variants` structurally as `StickerVariant[] | Array<{ id: string; name: string }>` so providers from both `@pixerate/stickers` and `@pixerate/editor/stickers` are assignable without casts.

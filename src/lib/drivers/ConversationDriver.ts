@@ -1,3 +1,4 @@
+import type { ReactionInput } from '../core/reactions.js';
 import type {
   Conversation,
   CreateConversationPayload,
@@ -51,31 +52,31 @@ export interface ConversationDriver {
   deleteMessage(id: string, conversationId?: string): Promise<Message>;
 
   /**
-   * Adds an emoji reaction to a message.
+   * Adds an emoji or sticker reaction to a message.
    */
   addReaction(
     messageId: string,
-    reaction: { emoji: string; userId: string },
+    reaction: { emoji: string; sticker?: string; userId: string },
     conversationId?: string
   ): Promise<Message>;
 
   /**
-   * Removes an emoji reaction from a message.
+   * Removes an emoji or sticker reaction from a message.
    */
   removeReaction(
     messageId: string,
-    emoji: string,
+    reaction: ReactionInput,
     userId: string,
     conversationId?: string
   ): Promise<Message>;
 
   /**
-   * Adds the reaction if the user has not reacted with that emoji yet, otherwise removes it.
+   * Adds the reaction if the user has not reacted with that emoji/sticker yet, otherwise removes it.
    * The check and the write happen atomically against the stored message.
    */
   toggleReaction(
     messageId: string,
-    reaction: { emoji: string; userId: string },
+    reaction: { emoji: string; sticker?: string; userId: string },
     conversationId?: string
   ): Promise<Message>;
 

@@ -17,6 +17,7 @@ export type MessageStatus = z.infer<typeof MessageStatusSchema>;
 
 export const MessageReactionSchema = z.object({
   emoji: z.string(),
+  sticker: z.string().optional(),
   userId: z.string(),
   createdAt: z.string().optional()
 });
@@ -24,6 +25,7 @@ export type MessageReaction = z.infer<typeof MessageReactionSchema>;
 
 export interface GroupedReaction {
   emoji: string;
+  sticker?: string;
   count: number;
   hasReacted: boolean;
   users: string[];
@@ -40,6 +42,7 @@ export const MessageSchema = z.object({
   parentId: z.string().nullable().optional(),
   status: MessageStatusSchema.default('sent'),
   mentions: z.array(z.string()).default([]),
+  stickers: z.array(z.string()).optional(),
   attachments: z.array(z.record(z.unknown())).default([]),
   reactions: z.array(MessageReactionSchema).default([]),
   metadata: z.record(z.unknown()).optional(),
@@ -57,6 +60,7 @@ export type PostMessagePayload = {
   parentId?: string | null;
   status?: MessageStatus;
   mentions?: string[];
+  stickers?: string[];
   attachments?: Record<string, unknown>[];
   reactions?: MessageReaction[];
   metadata?: Record<string, unknown>;

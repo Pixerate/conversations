@@ -1,7 +1,80 @@
 import type { MessageReaction, GroupedReaction } from '../types.js';
+import {
+  formatStickerShortcode,
+  parseStickerShortcode,
+  type StickerProviderInput
+} from './stickers.js';
+
+export type ReactionInput =
+  | string
+  | {
+      emoji?: string;
+      sticker?: string;
+    };
+
+const COLON_REF_REGEX = /^[a-z][a-z0-9-]*:[a-z][a-z0-9-]*$/;
 
 /**
- * Aggregates emoji reactions into grouped summary items with tooltips and user participation.
+ * Normalizes an emoji or sticker reaction input into `{ emoji, sticker? }`.
+ * - Standard emoji (`"👍"`) -> `{ emoji: "👍" }`
+ * - Sticker shortcode (`":heart:"`, `":pixerate-heart:"`) -> `{ emoji: ":heart:", sticker: "heart" }`
+ * - Colon sticker ref (`"pixerate:heart"`) -> `{ emoji: ":heart:" | ":pixerate-heart:", sticker: "heart" | "pixerate-heart" }`
+ * - Explicit `{ sticker: "heart" }` -> `{ emoji: ":heart:", sticker: "heart" }`
+ */
+export function normalizeReactionInput(
+  input: ReactionInput,
+  provider?: StickerProviderInput
+): { emoji: string; sticker?: string } {
+  if (typeof input === 'string') {
+    const trimmed = input.trim();
+    const shortcodeId = parseStickerShortcode(trimmed);
+    if (shortcodeId) {
+      const formatted = formatStickerShortcode(shortcodeId, provider);
+      const cleanSticker = parseStickerShortcode(formatted) ?? shortcodeId;
+      return { emoji: formatted, sticker: cleanSticker };
+    }
+    if (COLON_REF_REGEX.test(trimmed)) {
+      const formatted = formatStickerShortcode(trimmed, provider);
+      const cleanSticker = parseStickerShortcode(formatted) ?? trimmed.replace(/:/g, '-');
+      return { emoji: formatted, sticker: cleanSticker };
+    }
+    return { emoji: trimmed };
+  }
+
+  const rawSticker = input.sticker?.trim();
+  const rawEmoji = input.emoji?.trim();
+
+  if (rawSticker) {
+    const formatted = formatStickerShortcode(rawSticker, provider);
+    const cleanSticker =
+      parseStickerShortcode(formatted) ?? rawSticker.replace(/^:+|:+$/g, '').replace(/:/g, '-');
+    return {
+      emoji: rawEmoji || formatted,
+      sticker: cleanSticker
+    };
+  }
+
+  if (rawEmoji) {
+    return normalizeReactionInput(rawEmoji, provider);
+  }
+
+  throw new Error('Reaction requires either an emoji or a sticker identifier.');
+}
+
+function reactionMatchesKey(
+  r: MessageReaction,
+  target: { emoji: string; sticker?: string }
+): boolean {
+  if (!r) return false;
+  const rSticker = r.sticker ?? parseStickerShortcode(r.emoji) ?? undefined;
+  // A sticker is the reaction's identity; `emoji` may only be its display fallback.
+  if (target.sticker) return rSticker === target.sticker;
+  if (rSticker) return target.emoji === rSticker;
+  return r.emoji === target.emoji;
+}
+
+/**
+ * Aggregates emoji and sticker reactions into grouped summary items with tooltips and user participation.
  * Compatible with the Operative discussion reaction model.
  */
 export function groupReactions(
@@ -9,27 +82,43 @@ export function groupReactions(
   currentUserId?: string,
   nameResolver?: (userId: string) => string
 ): GroupedReaction[] {
-  const map = new Map<string, { count: number; users: string[]; hasReacted: boolean }>();
+  const map = new Map<
+    string,
+    { emoji: string; sticker?: string; count: number; users: string[]; hasReacted: boolean }
+  >();
 
   for (const r of reactions) {
-    if (!r || !r.emoji) continue;
-    const existing = map.get(r.emoji) || { count: 0, users: [], hasReacted: false };
+    if (!r || (!r.emoji && !r.sticker)) continue;
+    const stickerId =
+      r.sticker ?? (r.emoji ? parseStickerShortcode(r.emoji) ?? undefined : undefined);
+    const emojiDisplay = r.emoji || (stickerId ? `:${stickerId}:` : '');
+    if (!emojiDisplay) continue;
+
+    const key = stickerId ? `sticker:${stickerId}` : `emoji:${emojiDisplay}`;
+    const existing = map.get(key) || {
+      emoji: emojiDisplay,
+      ...(stickerId ? { sticker: stickerId } : {}),
+      count: 0,
+      users: [],
+      hasReacted: false
+    };
     existing.count++;
     existing.users.push(r.userId);
     if (currentUserId && r.userId === currentUserId) {
       existing.hasReacted = true;
     }
-    map.set(r.emoji, existing);
+    map.set(key, existing);
   }
 
-  return Array.from(map.entries()).map(([emoji, data]) => {
+  return Array.from(map.values()).map(data => {
     const names = data.users.map(uid => (nameResolver ? nameResolver(uid) : uid));
     const formattedNames = names.join(', ');
     const tooltip = formattedNames
-      ? `${formattedNames} reacted with ${emoji}`
+      ? `${formattedNames} reacted with ${data.emoji}`
       : `${data.count} reaction${data.count > 1 ? 's' : ''}`;
     return {
-      emoji,
+      emoji: data.emoji,
+      ...(data.sticker ? { sticker: data.sticker } : {}),
       count: data.count,
       hasReacted: data.hasReacted,
       users: data.users,
@@ -40,12 +129,15 @@ export function groupReactions(
 }
 
 /**
- * Checks whether a specific user has reacted to a message with a given emoji.
+ * Checks whether a specific user has reacted to a message with a given emoji or sticker.
  */
 export function hasUserReacted(
   reactions: MessageReaction[] = [],
-  emoji: string,
-  userId: string
+  emojiOrSticker: ReactionInput,
+  userId: string,
+  provider?: StickerProviderInput
 ): boolean {
-  return reactions.some(r => r.emoji === emoji && r.userId === userId);
+  if (!reactions || reactions.length === 0) return false;
+  const target = normalizeReactionInput(emojiOrSticker, provider);
+  return reactions.some(r => r.userId === userId && reactionMatchesKey(r, target));
 }

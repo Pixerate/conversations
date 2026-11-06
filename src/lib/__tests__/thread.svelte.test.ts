@@ -51,4 +51,31 @@ describe('ThreadStore (Svelte 5)', () => {
     expect(toggleSpy).toHaveBeenCalledWith(msg.id, { emoji: '👍', userId: 'user_bob' }, convo.id);
     store.destroy();
   });
+
+  it('supports sticker reactions and inline sticker extraction on postReply', async () => {
+    const { store } = await setup();
+
+    const reply = await store.postReply('Shipped :heart:!', alice);
+    expect(reply.stickers).toEqual(['heart']);
+
+    const reacted = await store.toggleStickerReaction(reply.id, 'heart', 'user_bob');
+    expect(reacted.reactions).toHaveLength(1);
+    expect(reacted.reactions[0]).toMatchObject({
+      emoji: ':heart:',
+      sticker: 'heart',
+      userId: 'user_bob'
+    });
+
+    const grouped = store.getGroupedReactions(reply.id, 'user_bob');
+    expect(grouped[0]).toMatchObject({
+      emoji: ':heart:',
+      sticker: 'heart',
+      count: 1,
+      hasReacted: true
+    });
+
+    const toggledOff = await store.toggleStickerReaction(reply.id, 'heart', 'user_bob');
+    expect(toggledOff.reactions).toHaveLength(0);
+    store.destroy();
+  });
 });

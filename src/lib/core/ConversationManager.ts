@@ -10,10 +10,25 @@ import {
 import { ThreadTree } from './ThreadTree.js';
 import { ConversationTranscript, type TranscriptOptions } from './transcript.js';
 import { extractMentionIdsFromHtml } from './mentionTokens.js';
-import { buildMessageEdit } from './messageEdits.js';
+import { buildMessageEdit, type MessageEditSource } from './messageEdits.js';
+import { normalizeReactionInput, type ReactionInput } from './reactions.js';
+import {
+  createMessageStickerTools,
+  mergeMessageStickers,
+  resolveMessageStickers,
+  resolveSticker,
+  type MessageStickerAgentTool,
+  type ResolvedSticker,
+  type ResolveStickerOptions,
+  type StickerProviderInput
+} from './stickers.js';
 
 export interface ConversationManagerOptions {
   driver: ConversationDriver;
+  /**
+   * Optional sticker provider (or array of providers) for inline message stickers and sticker reactions.
+   */
+  stickerProvider?: StickerProviderInput;
   /**
    * Optional hook invoked whenever a message is posted (e.g. for notifications fan-out).
    */
@@ -22,6 +37,7 @@ export interface ConversationManagerOptions {
 
 export class ConversationManager {
   private driver: ConversationDriver;
+  private stickerProvider?: StickerProviderInput;
   private onMessagePosted?: (message: Message, conversation: Conversation) => void | Promise<void>;
 
   constructor(options: ConversationManagerOptions) {
@@ -29,7 +45,16 @@ export class ConversationManager {
       throw new Error('ConversationManager requires a storage driver.');
     }
     this.driver = options.driver;
+    this.stickerProvider = options.stickerProvider;
     this.onMessagePosted = options.onMessagePosted;
+  }
+
+  public getStickerProvider(): StickerProviderInput | undefined {
+    return this.stickerProvider;
+  }
+
+  public setStickerProvider(provider: StickerProviderInput | undefined): void {
+    this.stickerProvider = provider;
   }
 
   public async getConversation(id: string): Promise<Conversation | null> {
@@ -88,9 +113,13 @@ export class ConversationManager {
       }
     }
 
+    // Automatically harvest inline sticker shortcodes / HTML tokens
+    const stickers = mergeMessageStickers(payload.stickers, payload.content, payload.richContent);
+
     const message = await this.driver.postMessage({
       ...payload,
-      mentions
+      mentions,
+      ...(stickers.length > 0 ? { stickers } : {})
     });
 
     if (this.onMessagePosted) {
@@ -132,6 +161,8 @@ export class ConversationManager {
       }
     }
 
+    const stickers = mergeMessageStickers(payload.stickers, payload.content, payload.richContent);
+
     const optimisticMessage: Message = {
       id: tempId,
       conversationId: payload.conversationId,
@@ -141,6 +172,7 @@ export class ConversationManager {
       parentId: payload.parentId || null,
       status: 'pending',
       mentions,
+      ...(stickers.length > 0 ? { stickers } : {}),
       attachments: payload.attachments || [],
       reactions: payload.reactions || [],
       metadata: payload.metadata || {},
@@ -165,11 +197,16 @@ export class ConversationManager {
   public async editMessage(
     messageId: string,
     content: string,
-    options?: { richContent?: string; conversationId?: string }
+    options?: {
+      richContent?: string;
+      conversationId?: string;
+      /** The message being edited; keeps its stickers that are not inline tokens. */
+      previous?: MessageEditSource;
+    }
   ): Promise<Message> {
     return this.driver.updateMessage(
       messageId,
-      buildMessageEdit(content, options?.richContent),
+      buildMessageEdit(content, options?.richContent, options?.previous),
       options?.conversationId
     );
   }
@@ -180,29 +217,86 @@ export class ConversationManager {
 
   public async addReaction(
     messageId: string,
-    emoji: string,
+    emojiOrReaction: ReactionInput,
     userId: string,
     conversationId?: string
   ): Promise<Message> {
-    return this.driver.addReaction(messageId, { emoji, userId }, conversationId);
+    const normalized = normalizeReactionInput(emojiOrReaction, this.stickerProvider);
+    return this.driver.addReaction(messageId, { ...normalized, userId }, conversationId);
   }
 
   public async removeReaction(
     messageId: string,
-    emoji: string,
+    emojiOrReaction: ReactionInput,
     userId: string,
     conversationId?: string
   ): Promise<Message> {
-    return this.driver.removeReaction(messageId, emoji, userId, conversationId);
+    const normalized = normalizeReactionInput(emojiOrReaction, this.stickerProvider);
+    return this.driver.removeReaction(messageId, normalized, userId, conversationId);
   }
 
   public async toggleReaction(
     messageId: string,
-    emoji: string,
+    emojiOrReaction: ReactionInput,
     userId: string,
     conversationId?: string
   ): Promise<Message> {
-    return this.driver.toggleReaction(messageId, { emoji, userId }, conversationId);
+    const normalized = normalizeReactionInput(emojiOrReaction, this.stickerProvider);
+    return this.driver.toggleReaction(messageId, { ...normalized, userId }, conversationId);
+  }
+
+  public async addStickerReaction(
+    messageId: string,
+    sticker: string,
+    userId: string,
+    conversationId?: string
+  ): Promise<Message> {
+    return this.addReaction(messageId, { sticker }, userId, conversationId);
+  }
+
+  public async removeStickerReaction(
+    messageId: string,
+    sticker: string,
+    userId: string,
+    conversationId?: string
+  ): Promise<Message> {
+    return this.removeReaction(messageId, { sticker }, userId, conversationId);
+  }
+
+  public async toggleStickerReaction(
+    messageId: string,
+    sticker: string,
+    userId: string,
+    conversationId?: string
+  ): Promise<Message> {
+    return this.toggleReaction(messageId, { sticker }, userId, conversationId);
+  }
+
+  public async resolveSticker(
+    tokenOrRef: string,
+    options?: ResolveStickerOptions
+  ): Promise<ResolvedSticker | undefined> {
+    if (!this.stickerProvider) return undefined;
+    return resolveSticker(this.stickerProvider, tokenOrRef, options);
+  }
+
+  public async resolveMessageStickers(
+    message: Pick<Message, 'content' | 'richContent' | 'stickers' | 'reactions'>,
+    options?: ResolveStickerOptions
+  ): Promise<Map<string, ResolvedSticker>> {
+    if (!this.stickerProvider) return new Map();
+    return resolveMessageStickers(this.stickerProvider, message, options);
+  }
+
+  public createStickerTools(): MessageStickerAgentTool[] {
+    return createMessageStickerTools({
+      provider: () => {
+        if (!this.stickerProvider) {
+          throw new Error('No stickerProvider configured on ConversationManager.');
+        }
+        return this.stickerProvider;
+      }
+    });
   }
 
   public async listMessages(conversationId: string): Promise<Message[]> {

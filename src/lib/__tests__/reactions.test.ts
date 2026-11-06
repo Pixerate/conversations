@@ -71,4 +71,50 @@ describe('reactions', () => {
     expect(groupReactions([])).toEqual([]);
     expect(hasUserReacted([], '👍', 'u1')).toBe(false);
   });
+
+  it('groups and matches sticker reactions alongside emoji reactions', () => {
+    const reactions: MessageReaction[] = [
+      { emoji: ':heart:', sticker: 'heart', userId: 'u1' },
+      { emoji: ':heart:', userId: 'u2' },
+      { emoji: ':pixerate-party-popper:', sticker: 'pixerate-party-popper', userId: 'agent_1' }
+    ];
+
+    const grouped = groupReactions(reactions, 'u2');
+    expect(grouped).toHaveLength(2);
+
+    const heartGroup = grouped.find(g => g.sticker === 'heart');
+    expect(heartGroup).toBeDefined();
+    expect(heartGroup?.emoji).toBe(':heart:');
+    expect(heartGroup?.count).toBe(2);
+    expect(heartGroup?.hasReacted).toBe(true);
+    expect(heartGroup?.tooltip).toBe('u1, u2 reacted with :heart:');
+
+    expect(hasUserReacted(reactions, ':heart:', 'u1')).toBe(true);
+    expect(hasUserReacted(reactions, { sticker: 'heart' }, 'u2')).toBe(true);
+    expect(hasUserReacted(reactions, ':pixerate-party-popper:', 'agent_1')).toBe(true);
+  });
+});
+
+describe('sticker reaction identity', () => {
+  it('does not treat a plain emoji and a sticker sharing that emoji as the same reaction', () => {
+    expect(hasUserReacted([{ emoji: '👍', userId: 'u' }], { emoji: '👍', sticker: 'thumb' }, 'u')).toBe(
+      false
+    );
+    expect(
+      hasUserReacted([{ emoji: '👍', sticker: 'thumb', userId: 'u' }], '👍', 'u')
+    ).toBe(false);
+    expect(
+      hasUserReacted(
+        [{ emoji: '❤️', sticker: 'a', userId: 'u' }],
+        { emoji: '❤️', sticker: 'b' },
+        'u'
+      )
+    ).toBe(false);
+  });
+
+  it('still matches a sticker reaction by its shortcode or sticker id', () => {
+    const reactions = [{ emoji: '❤️', sticker: 'heart', userId: 'u' }];
+    expect(hasUserReacted(reactions, ':heart:', 'u')).toBe(true);
+    expect(hasUserReacted(reactions, { sticker: 'heart' }, 'u')).toBe(true);
+  });
 });
