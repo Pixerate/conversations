@@ -8,6 +8,7 @@ import {
   extractMessageStickers,
   resolveMessageStickers,
   resolveSticker,
+  unwrapStickerProvider,
   type ResolvedSticker,
   type ResolveStickerOptions,
   type StickerProviderInput
@@ -15,16 +16,6 @@ import {
 
 export interface ThreadStoreOptions {
   stickerProvider?: StickerProviderInput;
-}
-
-function unwrapStickerProvider(
-  options?: ThreadStoreOptions | StickerProviderInput
-): StickerProviderInput | undefined {
-  if (!options) return undefined;
-  if (Array.isArray(options) || typeof (options as any).load === 'function') {
-    return options as StickerProviderInput;
-  }
-  return (options as ThreadStoreOptions).stickerProvider;
 }
 
 export class ThreadStore {
@@ -35,7 +26,7 @@ export class ThreadStore {
   public conversation = $state<Conversation | null>(null);
   public serverMessages = $state<Message[]>([]);
   public optimisticMessages = $state<Message[]>([]);
-  public stickerProvider = $state<StickerProviderInput | undefined>(undefined);
+  public stickerProvider = $state.raw<StickerProviderInput | undefined>(undefined);
   public loading = $state<boolean>(true);
   public error = $state<Error | null>(null);
 
@@ -124,7 +115,7 @@ export class ThreadStore {
   public async editMessage(messageId: string, content: string, richContent?: string) {
     return this.driver.updateMessage(
       messageId,
-      buildMessageEdit(content, richContent),
+      buildMessageEdit(content, richContent, this.messages.find(m => m.id === messageId)),
       this.conversationId
     );
   }
@@ -140,7 +131,7 @@ export class ThreadStore {
 
   public async removeReaction(messageId: string, emojiOrReaction: ReactionInput, userId: string) {
     const normalized = normalizeReactionInput(emojiOrReaction, this.stickerProvider);
-    return this.driver.removeReaction(messageId, normalized.emoji, userId, this.conversationId);
+    return this.driver.removeReaction(messageId, normalized, userId, this.conversationId);
   }
 
   public async toggleReaction(messageId: string, emojiOrReaction: ReactionInput, userId: string) {

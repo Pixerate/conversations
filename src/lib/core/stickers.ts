@@ -97,6 +97,11 @@ export interface StickerProvider {
   categories?(): MaybePromise<Array<{ id: string; name: string; count: number }>>;
   collections?(): MaybePromise<StickerCollection[]>;
   listCollections?(): MaybePromise<StickerCollection[]>;
+  /**
+   * Maps an id of a combined provider to the pack that owns it, for providers whose ids
+   * do not reveal their owner (`pixerate-heart` -> `{ providerId: 'pixerate', id: 'heart' }`).
+   */
+  resolveStickerOwner?(id: string): { providerId: string; id: string } | undefined;
 }
 
 /**
@@ -128,10 +133,44 @@ const DEFAULT_PAGE_LIMIT = 24;
 const MAX_PAGE_LIMIT = 100;
 
 /**
- * Matches `:shortcode:` where the inner id is kebab-case starting with a lowercase ASCII letter,
- * and the colons are not part of `::`, `://`, URL ports, or adjacent word characters.
+ * Matches a run of one or more back-to-back `:shortcode:` tokens, where each inner id is
+ * kebab-case starting with a lowercase ASCII letter, and the run is not part of `::`, `://`,
+ * URL ports, or adjacent word characters.
  */
-const SHORTCODE_REGEX = /(?<![:\w/]):([a-z][a-z0-9-]*):(?![:\w/])/g;
+const SHORTCODE_RUN_REGEX = /(?<![:\w/])(?::[a-z][a-z0-9-]*:)+(?![:\w/])/g;
+const SHORTCODE_TOKEN_REGEX = /:([a-z][a-z0-9-]*):/g;
+
+function* matchShortcodes(
+  text: string
+): Generator<{ index: number; shortcode: string; id: string }> {
+  for (const run of text.matchAll(SHORTCODE_RUN_REGEX)) {
+    for (const token of run[0].matchAll(SHORTCODE_TOKEN_REGEX)) {
+      yield { index: run.index + token.index, shortcode: token[0], id: token[1] };
+    }
+  }
+}
+
+function unknownStickerError(message: string): Error {
+  return Object.assign(new Error(message), { code: 'unknown_sticker' });
+}
+
+/** True for a provider's "no such sticker" refusal, as opposed to a real failure. */
+function isStickerMiss(err: unknown): boolean {
+  const code = (err as { code?: unknown } | null | undefined)?.code;
+  return code === 'unknown_sticker' || code === 'unknown_set';
+}
+
+/**
+ * Picks a format the provider can serve. A namespaced provider may mix formats across
+ * packs, so it is left to decide per pack.
+ */
+function withDefaultFormat(
+  provider: StickerProvider,
+  options: StickerLoadOptions = {}
+): StickerLoadOptions {
+  if (options.format || provider.namespaced) return options;
+  return { ...options, format: provider.capabilities.supportsSvg ? 'svg' : 'png' };
+}
 
 function stripColons(token: string): string {
   const trimmed = token.trim();
@@ -147,7 +186,9 @@ function isProviderArray(input: StickerProviderInput): input is readonly Sticker
 
 function isMultiPack(provider?: StickerProviderInput): boolean {
   if (!provider) return false;
-  if (isProviderArray(provider)) return provider.length > 1;
+  if (isProviderArray(provider)) {
+    return provider.length > 1 || Boolean(provider[0]?.namespaced);
+  }
   return Boolean(provider.namespaced);
 }
 
@@ -177,6 +218,11 @@ export function formatStickerShortcode(
       const rest = raw.slice(colonIdx + 1);
       return prefix === singleProvider.id ? `:${rest}:` : `:${prefix}-${rest}:`;
     }
+    // `:pixerate-heart:` and `:heart:` resolve to the same sticker in a single pack
+    const ownPrefix = `${singleProvider.id}-`;
+    if (raw.startsWith(ownPrefix) && raw.length > ownPrefix.length) {
+      return `:${raw.slice(ownPrefix.length)}:`;
+    }
     return `:${raw}:`;
   }
 
@@ -184,15 +230,6 @@ export function formatStickerShortcode(
     const prefix = raw.slice(0, colonIdx);
     const rest = raw.slice(colonIdx + 1);
     return `:${prefix}-${rest}:`;
-  }
-
-  if (
-    provider &&
-    isProviderArray(provider) &&
-    provider.length === 1 &&
-    provider[0].namespaced
-  ) {
-    return `:${raw.replace(/:/g, '-')}:`;
   }
 
   return `:${raw}:`;
@@ -241,7 +278,7 @@ export function combineMessageStickerProviders(
     if (colonIdx > 0) {
       const p = byId.get(clean.slice(0, colonIdx));
       if (!p) {
-        throw new Error(
+        throw unknownStickerError(
           `Unknown sticker provider "${clean.slice(0, colonIdx)}". Available providers: ${ids.join(', ')}.`
         );
       }
@@ -259,7 +296,7 @@ export function combineMessageStickerProviders(
       return { provider: providers[0], id: clean };
     }
 
-    throw new Error(
+    throw unknownStickerError(
       `Sticker "${rawId}" must be namespaced with its pack id (e.g. ":${providers[0].id}-${clean}:"). Available packs: ${ids.join(', ')}.`
     );
   };
@@ -285,11 +322,30 @@ export function combineMessageStickerProviders(
       throw new Error(`limit must be a whole number from 1 to ${MAX_PAGE_LIMIT}, got ${limit}.`);
     }
 
+    const { after: _after, limit: _limit, ...baseFilters } = searchOpts;
+
+    // Results carry `<pack>-<collection>` ids, so a filter on one targets only that pack
+    let targets: readonly StickerProvider[] = providers;
+    let filters = baseFilters;
+    const collection = baseFilters.collection;
+    const collectionOwner = collection
+      ? sortedByPrefix.find(
+          p =>
+            !p.namespaced &&
+            collection.startsWith(`${p.id}-`) &&
+            collection.length > p.id.length + 1
+        )
+      : undefined;
+    if (collection && collectionOwner) {
+      targets = [collectionOwner];
+      filters = { ...baseFilters, collection: collection.slice(collectionOwner.id.length + 1) };
+    }
+
     let providerIdx = 0;
     let innerCursor: string | undefined;
     if (searchOpts.after !== undefined) {
       const m = /^(\d+)\|(.*)$/.exec(searchOpts.after);
-      if (!m || Number(m[1]) >= providers.length) {
+      if (!m || Number(m[1]) >= targets.length) {
         throw new Error(
           `after "${searchOpts.after}" is not a valid cursor; pass the next value from the previous page.`
         );
@@ -298,20 +354,19 @@ export function combineMessageStickerProviders(
       innerCursor = m[2] || undefined;
     }
 
-    const { after: _after, limit: _limit, ...filters } = searchOpts;
     const runProvider = (p: StickerProvider, opts: StickerSearchOptions) =>
       query === null ? p.list(opts) : p.search(query, opts);
 
     let total = 0;
-    for (const p of providers) {
+    for (const p of targets) {
       total += (await runProvider(p, { ...filters, limit: 1 })).total;
     }
 
     const items: StickerSummary[] = [];
     let next: string | undefined;
 
-    while (providerIdx < providers.length && items.length < limit) {
-      const p = providers[providerIdx];
+    while (providerIdx < targets.length && items.length < limit) {
+      const p = targets[providerIdx];
       const res = await runProvider(p, {
         ...filters,
         limit: limit - items.length,
@@ -329,7 +384,7 @@ export function combineMessageStickerProviders(
       innerCursor = undefined;
     }
 
-    if (!next && items.length >= limit && providerIdx < providers.length) {
+    if (!next && items.length >= limit && providerIdx < targets.length) {
       next = `${providerIdx}|`;
     }
 
@@ -355,13 +410,22 @@ export function combineMessageStickerProviders(
         const { provider, id: innerId } = resolveOwner(id);
         const d = await provider.describe(innerId);
         return d ? prefixSummary(provider, d) : undefined;
-      } catch {
-        return undefined;
+      } catch (err) {
+        if (isStickerMiss(err)) return undefined;
+        throw err;
       }
     },
     async load(id, opts) {
       const { provider, id: innerId } = resolveOwner(id);
-      return provider.load(innerId, opts);
+      return provider.load(innerId, withDefaultFormat(provider, opts));
+    },
+    resolveStickerOwner(id) {
+      try {
+        const { provider, id: innerId } = resolveOwner(id);
+        return { providerId: provider.id, id: innerId };
+      } catch {
+        return undefined;
+      }
     },
     async categories() {
       const counts = new Map<string, { id: string; name: string; count: number }>();
@@ -393,10 +457,8 @@ export function extractStickerTokensFromText(text: string): string[] {
     .replace(/`[^`\n]+`/g, ' ');
 
   const ids = new Set<string>();
-  for (const match of shielded.matchAll(SHORTCODE_REGEX)) {
-    if (match[1]) {
-      ids.add(match[1]);
-    }
+  for (const { id } of matchShortcodes(shielded)) {
+    ids.add(id);
   }
   return Array.from(ids);
 }
@@ -455,6 +517,33 @@ export function extractMessageStickers(content: string, richContent?: string): s
 }
 
 /**
+ * Merges explicitly attached sticker ids with those harvested from a message's content,
+ * keeping the explicit ones first and dropping duplicates.
+ */
+export function mergeMessageStickers(
+  explicit: readonly string[] | undefined,
+  content: string,
+  richContent?: string
+): string[] {
+  return Array.from(new Set([...(explicit ?? []), ...extractMessageStickers(content, richContent)]));
+}
+
+/**
+ * Reads the sticker provider from a framework wrapper's options, which accept either
+ * `{ stickerProvider }` or the provider input itself.
+ */
+export function unwrapStickerProvider(
+  options?: { stickerProvider?: StickerProviderInput } | StickerProviderInput
+): StickerProviderInput | undefined {
+  if (!options) return undefined;
+  if (isProviderArray(options as StickerProviderInput)) return options as StickerProviderInput;
+  if (typeof (options as StickerProvider).load === 'function') {
+    return options as StickerProvider;
+  }
+  return (options as { stickerProvider?: StickerProviderInput }).stickerProvider;
+}
+
+/**
  * Splits message text into alternating `'text'` and `'sticker'` segments so UI components
  * can render inline stickers alongside text without matching inside fenced or inline code blocks.
  */
@@ -478,17 +567,12 @@ export function parseMessageStickerSegments(text: string): MessageStickerSegment
 
   const parsePlainChunk = (chunk: string) => {
     let chunkIndex = 0;
-    for (const match of chunk.matchAll(SHORTCODE_REGEX)) {
-      const start = match.index!;
-      if (start > chunkIndex) {
-        pushText(chunk.slice(chunkIndex, start));
+    for (const { index, shortcode, id } of matchShortcodes(chunk)) {
+      if (index > chunkIndex) {
+        pushText(chunk.slice(chunkIndex, index));
       }
-      segments.push({
-        type: 'sticker',
-        shortcode: match[0],
-        id: match[1]
-      });
-      chunkIndex = start + match[0].length;
+      segments.push({ type: 'sticker', shortcode, id });
+      chunkIndex = index + shortcode.length;
     }
     if (chunkIndex < chunk.length) {
       pushText(chunk.slice(chunkIndex));
@@ -514,6 +598,18 @@ export function parseMessageStickerSegments(text: string): MessageStickerSegment
 export interface ResolveStickerOptions extends StickerLoadOptions {
   /** Also fetch `StickerDescription` from `provider.describe(id)`. */
   includeDescription?: boolean;
+  /**
+   * Called when a provider fails for a reason other than an unknown sticker, such as a
+   * network error. Resolution still yields `undefined` so one bad sticker cannot break
+   * rendering a message; this is how callers tell the two apart.
+   */
+  onError?: (error: unknown, token: string) => void;
+}
+
+interface StickerLoadContext {
+  loadOpts: StickerLoadOptions;
+  includeDescription: boolean | undefined;
+  reportError: (error: unknown) => void;
 }
 
 /**
@@ -530,14 +626,18 @@ export async function resolveSticker(
   const clean = stripColons(tokenOrRef);
   if (!clean) return undefined;
 
-  const { includeDescription, ...loadOpts } = options;
-  const multi = isMultiPack(providerInput);
+  const { includeDescription, onError, ...loadOpts } = options;
+  const ctx: StickerLoadContext = {
+    loadOpts,
+    includeDescription,
+    reportError: error => onError?.(error, tokenOrRef)
+  };
 
   // Case 1: Array of providers
   if (Array.isArray(providerInput)) {
     if (providerInput.length === 0) return undefined;
     if (providerInput.length === 1) {
-      return resolveFromSingleProvider(providerInput[0], clean, loadOpts, includeDescription, false);
+      return resolveFromSingleProvider(providerInput[0], clean, ctx);
     }
 
     const sorted = [...providerInput].sort((a, b) => b.id.length - a.id.length);
@@ -547,14 +647,14 @@ export async function resolveSticker(
       const innerId = clean.slice(colonIdx + 1);
       const matched = providerInput.find(p => p.id === targetProviderId);
       if (!matched) return undefined;
-      return loadFromProvider(matched, innerId, loadOpts, includeDescription, true);
+      return loadFromProvider(matched, innerId, ctx, true);
     }
 
     for (const p of sorted) {
       const prefix = `${p.id}-`;
       if (clean.startsWith(prefix) && clean.length > prefix.length) {
         const innerId = clean.slice(prefix.length);
-        const resolved = await loadFromProvider(p, innerId, loadOpts, includeDescription, true);
+        const resolved = await loadFromProvider(p, innerId, ctx, true);
         if (resolved) return resolved;
       }
     }
@@ -562,16 +662,13 @@ export async function resolveSticker(
   }
 
   // Case 2: Single StickerProvider (either standalone or pre-combined namespaced)
-  const single = providerInput as StickerProvider;
-  return resolveFromSingleProvider(single, clean, loadOpts, includeDescription, multi);
+  return resolveFromSingleProvider(providerInput as StickerProvider, clean, ctx);
 }
 
 async function resolveFromSingleProvider(
   provider: StickerProvider,
   clean: string,
-  loadOpts: StickerLoadOptions,
-  includeDescription: boolean | undefined,
-  multi: boolean
+  ctx: StickerLoadContext
 ): Promise<ResolvedSticker | undefined> {
   if (!provider.namespaced) {
     // Non-namespaced single provider (e.g. `pixerateStickers()`, id = "pixerate")
@@ -590,13 +687,7 @@ async function resolveFromSingleProvider(
     }
 
     for (const candidate of candidates) {
-      const resolved = await loadFromProvider(
-        provider,
-        candidate,
-        loadOpts,
-        includeDescription,
-        multi
-      );
+      const resolved = await loadFromProvider(provider, candidate, ctx, false);
       if (resolved) return resolved;
     }
     return undefined;
@@ -604,7 +695,14 @@ async function resolveFromSingleProvider(
 
   // Pre-combined namespaced provider (e.g. `combineStickerProviders` or `combineMessageStickerProviders`)
   // 1. Try as-is (works when `clean` is `pixerate:heart` or dash-namespaced in `combineMessageStickerProviders`)
-  const direct = await loadFromNamespacedProvider(provider, clean, loadOpts, includeDescription);
+  const owner = clean.includes(':') ? undefined : provider.resolveStickerOwner?.(clean);
+  const direct = await loadFromNamespacedProvider(
+    provider,
+    clean,
+    ctx,
+    owner?.providerId,
+    owner?.id
+  );
   if (direct) return direct;
 
   // 2. If `clean` is dash-namespaced (`pixerate-heart` or `slop-machine-slop-bucket`) and the
@@ -623,8 +721,7 @@ async function resolveFromSingleProvider(
       const resolved = await loadFromNamespacedProvider(
         provider,
         colonRef,
-        loadOpts,
-        includeDescription,
+        ctx,
         candidateProvider,
         candidateId
       );
@@ -635,73 +732,89 @@ async function resolveFromSingleProvider(
   return undefined;
 }
 
+/** Loads an asset, keeping it even if the optional description cannot be fetched. */
+async function loadAsset(
+  provider: StickerProvider,
+  id: string,
+  ctx: StickerLoadContext
+): Promise<{ asset: StickerAsset; description?: StickerDescription } | undefined> {
+  const report = (err: unknown) => {
+    if (!isStickerMiss(err)) ctx.reportError(err);
+  };
+
+  let asset: StickerAsset;
+  try {
+    asset = await provider.load(id, withDefaultFormat(provider, ctx.loadOpts));
+  } catch (err) {
+    report(err);
+    return undefined;
+  }
+
+  if (!ctx.includeDescription) return { asset };
+  try {
+    const description = await provider.describe(id);
+    return { asset, ...(description ? { description } : {}) };
+  } catch (err) {
+    report(err);
+    return { asset };
+  }
+}
+
 async function loadFromProvider(
   provider: StickerProvider,
   id: string,
-  loadOpts: StickerLoadOptions,
-  includeDescription: boolean | undefined,
+  ctx: StickerLoadContext,
   multi: boolean
 ): Promise<ResolvedSticker | undefined> {
-  try {
-    const asset = await provider.load(id, { format: 'svg', ...loadOpts });
-    const description = includeDescription ? await provider.describe(id) : undefined;
-    const shortcode = multi ? `:${provider.id}-${id}:` : `:${id}:`;
-    return {
-      id,
-      providerId: provider.id,
-      ref: `${provider.id}:${id}`,
-      shortcode,
-      asset,
-      ...(description ? { description } : {})
-    };
-  } catch {
-    return undefined;
-  }
+  const loaded = await loadAsset(provider, id, ctx);
+  if (!loaded) return undefined;
+  return {
+    id,
+    providerId: provider.id,
+    ref: `${provider.id}:${id}`,
+    shortcode: multi ? `:${provider.id}-${id}:` : `:${id}:`,
+    ...loaded
+  };
 }
 
 async function loadFromNamespacedProvider(
   provider: StickerProvider,
   refOrId: string,
-  loadOpts: StickerLoadOptions,
-  includeDescription: boolean | undefined,
+  ctx: StickerLoadContext,
   knownProviderId?: string,
   knownInnerId?: string
 ): Promise<ResolvedSticker | undefined> {
-  try {
-    const asset = await provider.load(refOrId, { format: 'svg', ...loadOpts });
-    const description = includeDescription ? await provider.describe(refOrId) : undefined;
+  const loaded = await loadAsset(provider, refOrId, ctx);
+  if (!loaded) return undefined;
 
-    let providerId = knownProviderId ?? provider.id;
-    let id = knownInnerId ?? refOrId;
-    const colonIdx = refOrId.indexOf(':');
-    if (colonIdx > 0) {
-      providerId = refOrId.slice(0, colonIdx);
-      id = refOrId.slice(colonIdx + 1);
-    } else if (!knownProviderId && description?.id) {
-      const dColon = description.id.indexOf(':');
-      if (dColon > 0) {
-        providerId = description.id.slice(0, dColon);
-        id = description.id.slice(dColon + 1);
-      }
+  let providerId = knownProviderId ?? provider.id;
+  let id = knownInnerId ?? refOrId;
+  const colonIdx = refOrId.indexOf(':');
+  if (colonIdx > 0) {
+    providerId = refOrId.slice(0, colonIdx);
+    id = refOrId.slice(colonIdx + 1);
+  } else if (!knownProviderId && loaded.description?.id) {
+    const dColon = loaded.description.id.indexOf(':');
+    if (dColon > 0) {
+      providerId = loaded.description.id.slice(0, dColon);
+      id = loaded.description.id.slice(dColon + 1);
     }
-
-    const dashId = colonIdx > 0 ? `${providerId}-${id}` : refOrId;
-    return {
-      id,
-      providerId,
-      ref: colonIdx > 0 ? refOrId : `${providerId}:${id}`,
-      shortcode: `:${dashId}:`,
-      asset,
-      ...(description ? { description } : {})
-    };
-  } catch {
-    return undefined;
   }
+
+  const dashId = colonIdx > 0 ? `${providerId}-${id}` : refOrId;
+  return {
+    id,
+    providerId,
+    ref: colonIdx > 0 ? refOrId : `${providerId}:${id}`,
+    shortcode: `:${dashId}:`,
+    ...loaded
+  };
 }
 
 /**
  * Resolves all inline stickers and sticker reactions present on a message.
- * Returns a Map keyed by both the raw token/id and its `:shortcode:` for fast lookup.
+ * Returns a Map keyed by the raw token/id, its `:shortcode:` and its ref for fast lookup, plus
+ * its bare id when a single pack is active.
  */
 export async function resolveMessageStickers(
   providerInput: StickerProviderInput,
@@ -722,6 +835,8 @@ export async function resolveMessageStickers(
     }
   }
 
+  // Bare ids are only unique within a pack, so they cannot key a multi-pack map
+  const multi = isMultiPack(providerInput);
   const resolvedMap = new Map<string, ResolvedSticker>();
   await Promise.all(
     Array.from(tokens).map(async token => {
@@ -730,7 +845,7 @@ export async function resolveMessageStickers(
         resolvedMap.set(token, resolved);
         resolvedMap.set(stripColons(token), resolved);
         resolvedMap.set(resolved.shortcode, resolved);
-        resolvedMap.set(resolved.id, resolved);
+        if (!multi) resolvedMap.set(resolved.id, resolved);
         resolvedMap.set(resolved.ref, resolved);
       }
     })
@@ -887,7 +1002,16 @@ export function createMessageStickerTools(
     },
     handler: async ({ sticker }) => {
       const { input } = getCombined();
-      const resolved = await resolveSticker(input, String(sticker), { includeDescription: true });
+      let failure: unknown;
+      const resolved = await resolveSticker(input, String(sticker), {
+        includeDescription: true,
+        onError: error => {
+          failure = error;
+        }
+      });
+      if (!resolved && failure !== undefined) {
+        throw new Error(`Could not load sticker "${String(sticker)}".`, { cause: failure });
+      }
       if (!resolved) {
         throw new Error(
           `Unknown sticker "${String(sticker)}". Use find_message_stickers to list available sticker shortcodes.`

@@ -405,3 +405,155 @@ describe('Stickers core utilities', () => {
     });
   });
 });
+
+describe('sticker review fixes', () => {
+  const sticker = (id: string) => ({ id, name: id, category: 'test', tags: [] });
+  const packA = () => createMockStickerPack('pixerate', 'Pixerate', [sticker('heart')]);
+  const packB = () => createMockStickerPack('slop-machine', 'Slop', [sticker('heart')]);
+
+  it('reports the owning pack when resolving against a combined provider', async () => {
+    const combined = combineMessageStickerProviders([packA(), packB()]);
+    const resolved = await resolveSticker(combined, ':slop-machine-heart:');
+    expect(resolved).toMatchObject({
+      id: 'heart',
+      providerId: 'slop-machine',
+      ref: 'slop-machine:heart',
+      shortcode: ':slop-machine-heart:'
+    });
+    expect((await resolveSticker(combined, resolved!.ref))?.providerId).toBe('slop-machine');
+  });
+
+  it('does not key multi-pack results by bare id', async () => {
+    const map = await resolveMessageStickers([packA(), packB()], {
+      content: ':pixerate-heart: :slop-machine-heart:'
+    });
+    expect(map.has('heart')).toBe(false);
+    expect(map.get('pixerate:heart')?.providerId).toBe('pixerate');
+    expect(map.get(':slop-machine-heart:')?.providerId).toBe('slop-machine');
+  });
+
+  it('keeps bare id keys for a single pack', async () => {
+    const map = await resolveMessageStickers(packA(), { content: ':heart:' });
+    expect(map.get('heart')?.ref).toBe('pixerate:heart');
+  });
+
+  it('loads raster-only providers without requesting svg', async () => {
+    const formats: unknown[] = [];
+    const base = packA();
+    const raster: StickerProvider = {
+      ...base,
+      capabilities: { ...base.capabilities, supportsSvg: false, supportsRaster: true },
+      load: async (_id, options) => {
+        formats.push(options?.format);
+        if (options?.format === 'svg') throw new Error('svg unsupported');
+        return { kind: 'image', url: 'https://example.test/a.png', width: 1, height: 1 };
+      }
+    };
+    expect((await resolveSticker(raster, ':heart:'))?.asset.kind).toBe('image');
+    expect(
+      (await resolveSticker(combineMessageStickerProviders([raster, packB()]), ':pixerate-heart:'))
+        ?.asset.kind
+    ).toBe('image');
+    expect(formats).toEqual(['png', 'png']);
+  });
+
+  it('separates real failures from unknown stickers', async () => {
+    const failure = new Error('network down');
+    const unknown = Object.assign(new Error('nope'), { code: 'unknown_sticker' });
+    const errors: unknown[] = [];
+    const onError = (error: unknown) => errors.push(error);
+
+    const broken: StickerProvider = {
+      ...packA(),
+      load: async () => {
+        throw failure;
+      }
+    };
+    expect(await resolveSticker(broken, ':heart:', { onError })).toBeUndefined();
+    expect(errors).toEqual([failure]);
+
+    const missing: StickerProvider = {
+      ...packA(),
+      load: async () => {
+        throw unknown;
+      }
+    };
+    expect(await resolveSticker(missing, ':heart:', { onError })).toBeUndefined();
+    expect(errors).toEqual([failure]);
+
+    const [, describeTool] = createMessageStickerTools({ provider: () => broken });
+    await expect(describeTool.handler({ sticker: ':heart:' })).rejects.toThrow(
+      'Could not load sticker'
+    );
+  });
+
+  it('keeps the asset when the description fails', async () => {
+    const provider: StickerProvider = {
+      ...packA(),
+      describe: async () => {
+        throw new Error('metadata down');
+      }
+    };
+    const resolved = await resolveSticker(provider, ':heart:', { includeDescription: true });
+    expect(resolved?.asset).toBeDefined();
+    expect(resolved?.description).toBeUndefined();
+  });
+
+  it('routes a prefixed collection filter to the owning pack only', async () => {
+    const seen: Array<[string, string | undefined]> = [];
+    const spy = (pack: StickerProvider): StickerProvider => ({
+      ...pack,
+      list: async options => {
+        seen.push([pack.id, options?.collection]);
+        return { items: [], total: 0 };
+      }
+    });
+    const combined = combineMessageStickerProviders([spy(packA()), spy(packB())]);
+    await combined.list({ collection: 'slop-machine-animals' });
+    expect(new Set(seen.map(([id]) => id))).toEqual(new Set(['slop-machine']));
+    expect(seen.every(([, collection]) => collection === 'animals')).toBe(true);
+  });
+
+  it('parses back-to-back shortcodes and still ignores false positives', () => {
+    expect(extractStickerTokensFromText(':heart::star: and :moon:')).toEqual([
+      'heart',
+      'star',
+      'moon'
+    ]);
+    expect(parseMessageStickerSegments('a :heart::star: b')).toEqual([
+      { type: 'text', value: 'a ' },
+      { type: 'sticker', shortcode: ':heart:', id: 'heart' },
+      { type: 'sticker', shortcode: ':star:', id: 'star' },
+      { type: 'text', value: ' b' }
+    ]);
+    expect(extractStickerTokensFromText('std::vector::size ::foo:: a:b:c :a::b')).toEqual([]);
+  });
+
+  it('collapses the two spellings of a sticker in a single pack', () => {
+    expect(formatStickerShortcode('pixerate-heart', packA())).toBe(':heart:');
+    expect(formatStickerShortcode('slop-machine-heart', packA())).toBe(':slop-machine-heart:');
+  });
+
+  it('removes only the targeted reaction when emoji and sticker share a display emoji', async () => {
+    const driver = new MemoryConversationDriver();
+    const manager = new ConversationManager({ driver });
+    const convo = await manager.createConversation({
+      id: 'c1',
+      entity: { type: 'doc', id: 'd1' }
+    } as any);
+    const msg = await manager.postMessage({
+      conversationId: convo.id,
+      author: { id: 'u', name: 'U' },
+      content: 'hi'
+    } as any);
+    await manager.addReaction(msg.id, '❤️', 'u', convo.id);
+    await manager.addReaction(msg.id, { emoji: '❤️', sticker: 'heart' }, 'u', convo.id);
+    const removed = await manager.removeReaction(
+      msg.id,
+      { emoji: '❤️', sticker: 'heart' },
+      'u',
+      convo.id
+    );
+    expect(removed.reactions.map(r => r.sticker)).toEqual([undefined]);
+  });
+});

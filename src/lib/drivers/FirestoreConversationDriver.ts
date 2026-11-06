@@ -5,7 +5,7 @@ import type {
   Message,
   PostMessagePayload
 } from '../types.js';
-import { hasUserReacted, normalizeReactionInput } from '../core/reactions.js';
+import { hasUserReacted, normalizeReactionInput, type ReactionInput } from '../core/reactions.js';
 
 export interface FirestoreConversationDriverOptions {
   /**
@@ -321,15 +321,16 @@ export class FirestoreConversationDriver implements ConversationDriver {
 
   public async removeReaction(
     messageId: string,
-    emoji: string,
+    reaction: ReactionInput,
     userId: string,
     conversationId?: string
   ): Promise<Message> {
     if (!conversationId) {
       throw new Error('removeReaction on FirestoreDriver requires conversationId.');
     }
+    const normalized = normalizeReactionInput(reaction);
     return this.mutateMessage(messageId, conversationId, existing => ({
-      reactions: withoutReaction(existing, emoji, userId)
+      reactions: withoutReaction(existing, normalized, userId)
     }));
   }
 
@@ -344,7 +345,7 @@ export class FirestoreConversationDriver implements ConversationDriver {
     const normalized = normalizeReactionInput(reaction);
     return this.mutateMessage(messageId, conversationId, existing => ({
       reactions: hasUserReacted(existing.reactions, normalized, reaction.userId)
-        ? withoutReaction(existing, normalized.emoji, reaction.userId)
+        ? withoutReaction(existing, normalized, reaction.userId)
         : withReaction(existing, { ...normalized, userId: reaction.userId })
     }));
   }
@@ -503,6 +504,6 @@ function withReaction(
   ];
 }
 
-function withoutReaction(message: Message, emoji: string, userId: string) {
-  return (message.reactions || []).filter(r => !hasUserReacted([r], emoji, userId));
+function withoutReaction(message: Message, reaction: ReactionInput, userId: string) {
+  return (message.reactions || []).filter(r => !hasUserReacted([r], reaction, userId));
 }

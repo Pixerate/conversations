@@ -154,4 +154,5 @@ Separately, `@pixerate/stickers` types `StickerDescription.variants` as `{ id: s
 
 - When resolving against an array of `StickerProvider`s, sort providers by descending `id.length` before matching `${provider.id}-` prefixes so longer hyphenated pack IDs (`slop-machine`) always match first.
 - When resolving a dash-namespaced shortcode against a pre-combined `namespaced: true` provider that expects `provider:id` refs, test candidate `-` → `:` split positions from longest prefix to shortest.
+- A sticker id that begins with its own pack id (`logo` vs `pixerate-logo` in pack `pixerate`) is ambiguous in single-pack mode: `formatStickerShortcode` strips the prefix so `:pixerate-heart:` and `:heart:` stay one reaction. Avoid pack-prefixed sticker ids.
 - Type `StickerDescription.variants` structurally as `StickerVariant[] | Array<{ id: string; name: string }>` so providers from both `@pixerate/stickers` and `@pixerate/editor/stickers` are assignable without casts.

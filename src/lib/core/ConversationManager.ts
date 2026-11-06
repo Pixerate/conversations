@@ -10,11 +10,11 @@ import {
 import { ThreadTree } from './ThreadTree.js';
 import { ConversationTranscript, type TranscriptOptions } from './transcript.js';
 import { extractMentionIdsFromHtml } from './mentionTokens.js';
-import { buildMessageEdit } from './messageEdits.js';
+import { buildMessageEdit, type MessageEditSource } from './messageEdits.js';
 import { normalizeReactionInput, type ReactionInput } from './reactions.js';
 import {
   createMessageStickerTools,
-  extractMessageStickers,
+  mergeMessageStickers,
   resolveMessageStickers,
   resolveSticker,
   type MessageStickerAgentTool,
@@ -114,12 +114,7 @@ export class ConversationManager {
     }
 
     // Automatically harvest inline sticker shortcodes / HTML tokens
-    let stickers = payload.stickers ? [...payload.stickers] : [];
-    for (const stickerId of extractMessageStickers(payload.content, payload.richContent)) {
-      if (!stickers.includes(stickerId)) {
-        stickers.push(stickerId);
-      }
-    }
+    const stickers = mergeMessageStickers(payload.stickers, payload.content, payload.richContent);
 
     const message = await this.driver.postMessage({
       ...payload,
@@ -166,12 +161,7 @@ export class ConversationManager {
       }
     }
 
-    let stickers = payload.stickers ? [...payload.stickers] : [];
-    for (const stickerId of extractMessageStickers(payload.content, payload.richContent)) {
-      if (!stickers.includes(stickerId)) {
-        stickers.push(stickerId);
-      }
-    }
+    const stickers = mergeMessageStickers(payload.stickers, payload.content, payload.richContent);
 
     const optimisticMessage: Message = {
       id: tempId,
@@ -207,11 +197,16 @@ export class ConversationManager {
   public async editMessage(
     messageId: string,
     content: string,
-    options?: { richContent?: string; conversationId?: string }
+    options?: {
+      richContent?: string;
+      conversationId?: string;
+      /** The message being edited; keeps its stickers that are not inline tokens. */
+      previous?: MessageEditSource;
+    }
   ): Promise<Message> {
     return this.driver.updateMessage(
       messageId,
-      buildMessageEdit(content, options?.richContent),
+      buildMessageEdit(content, options?.richContent, options?.previous),
       options?.conversationId
     );
   }
@@ -237,7 +232,7 @@ export class ConversationManager {
     conversationId?: string
   ): Promise<Message> {
     const normalized = normalizeReactionInput(emojiOrReaction, this.stickerProvider);
-    return this.driver.removeReaction(messageId, normalized.emoji, userId, conversationId);
+    return this.driver.removeReaction(messageId, normalized, userId, conversationId);
   }
 
   public async toggleReaction(

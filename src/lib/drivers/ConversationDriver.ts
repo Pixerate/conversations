@@ -1,3 +1,4 @@
+import type { ReactionInput } from '../core/reactions.js';
 import type {
   Conversation,
   CreateConversationPayload,
@@ -64,7 +65,7 @@ export interface ConversationDriver {
    */
   removeReaction(
     messageId: string,
-    emoji: string,
+    reaction: ReactionInput,
     userId: string,
     conversationId?: string
   ): Promise<Message>;

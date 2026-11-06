@@ -9,6 +9,7 @@ import {
   extractMessageStickers,
   resolveMessageStickers,
   resolveSticker,
+  unwrapStickerProvider,
   type ResolvedSticker,
   type ResolveStickerOptions,
   type StickerProviderInput
@@ -16,16 +17,6 @@ import {
 
 export interface UseThreadOptions {
   stickerProvider?: StickerProviderInput;
-}
-
-function unwrapStickerProvider(
-  options?: UseThreadOptions | StickerProviderInput
-): StickerProviderInput | undefined {
-  if (!options) return undefined;
-  if (Array.isArray(options) || typeof (options as any).load === 'function') {
-    return options as StickerProviderInput;
-  }
-  return (options as UseThreadOptions).stickerProvider;
 }
 
 export interface ThreadState {
@@ -175,7 +166,11 @@ class ThreadStoreSubscriber {
   public editMessage = async (messageId: string, content: string, richContent?: string) => {
     return this.driver.updateMessage(
       messageId,
-      buildMessageEdit(content, richContent),
+      buildMessageEdit(
+        content,
+        richContent,
+        this.state.messages.find(m => m.id === messageId)
+      ),
       this.conversationId
     );
   };
@@ -201,7 +196,7 @@ class ThreadStoreSubscriber {
     provider?: StickerProviderInput
   ) => {
     const normalized = normalizeReactionInput(emojiOrReaction, provider);
-    return this.driver.removeReaction(messageId, normalized.emoji, userId, this.conversationId);
+    return this.driver.removeReaction(messageId, normalized, userId, this.conversationId);
   };
 
   public toggleReaction = async (

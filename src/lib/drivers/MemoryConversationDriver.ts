@@ -5,7 +5,7 @@ import type {
   Message,
   PostMessagePayload
 } from '../types.js';
-import { hasUserReacted, normalizeReactionInput } from '../core/reactions.js';
+import { hasUserReacted, normalizeReactionInput, type ReactionInput } from '../core/reactions.js';
 
 type Listener = (conversation: Conversation | null, messages: Message[]) => void;
 type EntityListener = (conversations: Conversation[]) => void;
@@ -207,7 +207,7 @@ export class MemoryConversationDriver implements ConversationDriver {
 
   public async removeReaction(
     messageId: string,
-    emoji: string,
+    reaction: ReactionInput,
     userId: string,
     conversationId?: string
   ): Promise<Message> {
@@ -219,8 +219,9 @@ export class MemoryConversationDriver implements ConversationDriver {
       const msg = list.find(m => m.id === messageId);
       if (msg) {
         const currentReactions = msg.reactions || [];
+        const target = normalizeReactionInput(reaction);
         const updatedReactions = currentReactions.filter(
-          r => !hasUserReacted([r], emoji, userId)
+          r => !hasUserReacted([r], target, userId)
         );
         return this.updateMessage(messageId, { reactions: updatedReactions }, convoId);
       }
@@ -240,7 +241,7 @@ export class MemoryConversationDriver implements ConversationDriver {
       const msg = this.messages.get(convoId)?.find(m => m.id === messageId);
       if (msg) {
         return hasUserReacted(msg.reactions, normalized, reaction.userId)
-          ? this.removeReaction(messageId, normalized.emoji, reaction.userId, convoId)
+          ? this.removeReaction(messageId, normalized, reaction.userId, convoId)
           : this.addReaction(messageId, { ...normalized, userId: reaction.userId }, convoId);
       }
     }

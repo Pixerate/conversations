@@ -94,3 +94,27 @@ describe('reactions', () => {
     expect(hasUserReacted(reactions, ':pixerate-party-popper:', 'agent_1')).toBe(true);
   });
 });
+
+describe('sticker reaction identity', () => {
+  it('does not treat a plain emoji and a sticker sharing that emoji as the same reaction', () => {
+    expect(hasUserReacted([{ emoji: '👍', userId: 'u' }], { emoji: '👍', sticker: 'thumb' }, 'u')).toBe(
+      false
+    );
+    expect(
+      hasUserReacted([{ emoji: '👍', sticker: 'thumb', userId: 'u' }], '👍', 'u')
+    ).toBe(false);
+    expect(
+      hasUserReacted(
+        [{ emoji: '❤️', sticker: 'a', userId: 'u' }],
+        { emoji: '❤️', sticker: 'b' },
+        'u'
+      )
+    ).toBe(false);
+  });
+
+  it('still matches a sticker reaction by its shortcode or sticker id', () => {
+    const reactions = [{ emoji: '❤️', sticker: 'heart', userId: 'u' }];
+    expect(hasUserReacted(reactions, ':heart:', 'u')).toBe(true);
+    expect(hasUserReacted(reactions, { sticker: 'heart' }, 'u')).toBe(true);
+  });
+});

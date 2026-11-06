@@ -66,15 +66,11 @@ function reactionMatchesKey(
   target: { emoji: string; sticker?: string }
 ): boolean {
   if (!r) return false;
-  if (r.emoji === target.emoji) return true;
   const rSticker = r.sticker ?? parseStickerShortcode(r.emoji) ?? undefined;
-  if (target.sticker && rSticker) {
-    return rSticker === target.sticker;
-  }
-  if (rSticker && target.emoji === rSticker) {
-    return true;
-  }
-  return false;
+  // A sticker is the reaction's identity; `emoji` may only be its display fallback.
+  if (target.sticker) return rSticker === target.sticker;
+  if (rSticker) return target.emoji === rSticker;
+  return r.emoji === target.emoji;
 }
 
 /**
