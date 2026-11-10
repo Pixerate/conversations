@@ -8,7 +8,7 @@ on:
 jobs:
   release:
     name: Build, Version & Tag Package
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.SELF_HOSTED_RUNNER == 'true' && 'self-hosted' || 'ubuntu-latest' }}
     if: github.repository_owner == 'Pixerate' || github.event_name == 'workflow_dispatch'
     permissions:
       contents: write
@@ -36,7 +36,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 24
-          cache: 'npm'
+          cache: ${{ runner.environment != 'self-hosted' && 'npm' || '' }}
 
       - name: Install dependencies
         if: steps.changeset_check.outputs.count > 0 || github.event_name == 'workflow_dispatch'
