@@ -25,7 +25,26 @@ const pixerateBoundaryPatterns = [
 
 const coreDriverFrameworkPatterns = [
   {
-    group: ['svelte', 'svelte/*', 'react', 'react-dom', 'react/*', '../svelte/*', '../react/*'],
+    group: [
+      'svelte',
+      'svelte/*',
+      'react',
+      'react-dom',
+      'react/*',
+      'react-dom/*',
+      '../svelte',
+      '../svelte.js',
+      '../svelte/*',
+      '../react',
+      '../react.js',
+      '../react/*',
+      '$lib/svelte',
+      '$lib/svelte.js',
+      '$lib/svelte/*',
+      '$lib/react',
+      '$lib/react.js',
+      '$lib/react/*',
+    ],
     message:
       'src/lib/core/ and src/lib/drivers/ must remain UI-agnostic and never import Svelte or React (see AGENTS.md).',
   },
