@@ -28,11 +28,13 @@
     "./react": {
       "types": "./dist/react.d.ts",
       "default": "./dist/react.js"
-    }
+    },
+    "./json-schema/*": "./json-schema/*"
   },
   "files": [
     "dist",
     "!dist/__tests__",
+    "json-schema",
     "README.md",
     "CHANGELOG.md",
     "LICENSE",
@@ -40,7 +42,8 @@
   ],
   "scripts": {
     "dev": "vite dev",
-    "build": "svelte-kit sync && svelte-package && node -e \"require('node:fs').rmSync('dist/__tests__', { recursive: true, force: true })\"",
+    "build": "svelte-kit sync && svelte-package && node -e \"require('node:fs').rmSync('dist/__tests__', { recursive: true, force: true })\" && node scripts/export-json-schema.mjs",
+    "export:json-schema": "node scripts/export-json-schema.mjs",
     "prepare": "npm run build",
     "prepublishOnly": "npm run build",
     "lint": "eslint src",
@@ -121,6 +124,7 @@
     "typescript": "^5.7.3",
     "typescript-eslint": "^8.74.0",
     "vite": "^6.3.5",
-    "vitest": "^4.1.9"
+    "vitest": "^4.1.9",
+    "zod-to-json-schema": "^3.25.2"
   }
 }

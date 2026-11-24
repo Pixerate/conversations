@@ -13,7 +13,9 @@ A UI-agnostic, headless conversation and comment-threading engine for Svelte 5, 
   - `MemoryConversationDriver` for ultra-fast, offline, deterministic unit tests and Storybook.
   - `FirestoreConversationDriver` for production Cloud Firestore with real-time snapshot synchronization (`@pixerate/conversations/gcp`).
 - **Polymorphic Entity Attachment**: Attach threaded discussions to tasks, canvas nodes, video generations, prompt templates, or arbitrary entities.
-- **Transcript Serialization**: Export conversation trees to structured Markdown for LLM prompt context or audit logs.
+- **Inline Document Text-Range Anchoring**: Anchor threads to UTF-16 character ranges with W3C Web Annotation quote context (`exact`, `prefix`, `suffix`), automatic re-anchoring across edits, and orphan/undo recovery.
+- **Native Swift & JSON Schema Interop**: Zero-dependency Foundation Swift Package (`ConversationsKit`) plus exported Draft-07 JSON Schemas (`@pixerate/conversations/json-schema/*`) and canonical [Wire Schema](./docs/WIRE_SCHEMA.md).
+- **Transcript Serialization**: Export conversation trees (including inline document anchor quotes and open/resolved status) to structured Markdown for LLM prompt context or audit logs.
 - **Deep Integration**: Bridges seamlessly with `@pixerate/editor` (rich text and mention tokens), `@pixerate/realtime` (ephemeral typing indicators), and `@pixerate/notifications` (mention fan-out and unread badges).
 
 ---
@@ -148,6 +150,39 @@ export function TaskComments({ conversationId }: { conversationId: string }) {
   );
 }
 ```
+
+### 4. Inline Document Anchoring & Swift (`ConversationsKit`)
+
+```typescript
+import {
+  createTextAnchor,
+  reconcileTextAnchor,
+  formatDocumentThreadsAsMarkdown
+} from '@pixerate/conversations';
+
+const anchor = createTextAnchor(documentText, 42, 68);
+const convo = await manager.createConversation({
+  entity: { id: 'doc_1', type: 'document', title: 'Architecture Spec' },
+  anchor
+});
+
+// After edits to documentText, reconcile and persist updated offsets:
+const threads = await manager.reconcileDocumentAnchors('doc_1', updatedDocumentText);
+
+// Export open review threads in document order for LLM context:
+const markdown = formatDocumentThreadsAsMarkdown(
+  threads.map(conversation => ({ conversation, messages: [] })),
+  { statusFilter: ['open'] }
+);
+```
+
+For native Apple apps (macOS 13+ / iOS 16+), add `ConversationsKit` via Swift Package Manager:
+
+```swift
+.package(url: "https://github.com/Pixerate/conversations.git", from: "0.2.0")
+```
+
+See [docs/WIRE_SCHEMA.md](./docs/WIRE_SCHEMA.md) for the canonical Firestore and JSON sidecar wire format and `@pixerate/conversations/json-schema/*` for generated JSON Schemas.
 
 ---
 

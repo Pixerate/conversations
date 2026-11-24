@@ -4,9 +4,15 @@ import {
   type CreateConversationPayload,
   type Message,
   type PostMessagePayload,
+  type TextAnchor,
   type ThreadTreeNode,
   type ThreadTreeOptions
 } from '../types.js';
+import {
+  reconcileTextAnchor,
+  sortConversationsByAnchor,
+  type ReconcileAnchorOptions
+} from './anchors.js';
 import { ThreadTree } from './ThreadTree.js';
 import { ConversationTranscript, type TranscriptOptions } from './transcript.js';
 import { extractMentionIdsFromHtml } from './mentionTokens.js';
@@ -66,6 +72,66 @@ export class ConversationManager {
     entityType?: string
   ): Promise<Conversation | null> {
     return this.driver.getConversationByEntity(entityId, entityType);
+  }
+
+  public async listConversationsByEntity(
+    entityId: string,
+    options: {
+      entityType?: string;
+      sortByAnchor?: boolean;
+      orphanedLast?: boolean;
+    } = {}
+  ): Promise<Conversation[]> {
+    const conversations = await this.driver.listConversationsByEntity(
+      entityId,
+      options.entityType
+    );
+    if (options.sortByAnchor) {
+      return sortConversationsByAnchor(conversations, {
+        orphanedLast: options.orphanedLast
+      });
+    }
+    return conversations;
+  }
+
+  public async updateConversationAnchor(
+    conversationId: string,
+    anchor: TextAnchor | null
+  ): Promise<Conversation> {
+    return this.driver.updateConversationAnchor(conversationId, anchor);
+  }
+
+  public async reconcileDocumentAnchors(
+    entityId: string,
+    documentText: string,
+    options: ReconcileAnchorOptions & {
+      entityType?: string;
+      persist?: boolean;
+      orphanedLast?: boolean;
+    } = {}
+  ): Promise<Conversation[]> {
+    const entityType = options.entityType ?? 'document';
+    const persist = options.persist !== false;
+    const conversations = await this.driver.listConversationsByEntity(entityId, entityType);
+
+    const updatedList = await Promise.all(
+      conversations.map(async convo => {
+        if (!convo.anchor) return convo;
+        const reconciled = reconcileTextAnchor(convo.anchor, documentText, options);
+        if (reconciled === convo.anchor) return convo;
+        if (persist) {
+          return this.driver.updateConversationAnchor(convo.id, reconciled);
+        }
+        return {
+          ...convo,
+          anchor: reconciled
+        };
+      })
+    );
+
+    return sortConversationsByAnchor(updatedList, {
+      orphanedLast: options.orphanedLast
+    });
   }
 
   public async getOrCreateConversation(
@@ -345,8 +411,9 @@ export class ConversationManager {
   public subscribeToEntityConversations(
     entityId: string,
     onUpdate: (conversations: Conversation[]) => void,
-    onError?: (error: Error) => void
+    onError?: (error: Error) => void,
+    entityType?: string
   ): () => void {
-    return this.driver.subscribeToEntityConversations(entityId, onUpdate, onError);
+    return this.driver.subscribeToEntityConversations(entityId, onUpdate, onError, entityType);
   }
 }

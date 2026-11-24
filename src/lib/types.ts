@@ -12,6 +12,33 @@ export const EntityRefSchema = z.object({
 });
 export type EntityRef = z.infer<typeof EntityRefSchema>;
 
+export const TextQuoteSelectorSchema = z.object({
+  exact: z.string(),
+  prefix: z.string().optional(),
+  suffix: z.string().optional()
+});
+export type TextQuoteSelector = z.infer<typeof TextQuoteSelectorSchema>;
+
+export const TextAnchorStateSchema = z.enum(['attached', 'orphaned']);
+export type TextAnchorState = z.infer<typeof TextAnchorStateSchema>;
+
+export const TextAnchorSchema = z
+  .object({
+    /** Inclusive start offset in UTF-16 code units (matches JS string indices and Apple NSRange). */
+    start: z.number().int().nonnegative(),
+    /** Exclusive end offset in UTF-16 code units. */
+    end: z.number().int().nonnegative(),
+    quote: TextQuoteSelectorSchema,
+    state: TextAnchorStateSchema.default('attached')
+  })
+  .refine(anchor => anchor.end >= anchor.start, {
+    message: 'TextAnchor end offset must be greater than or equal to start offset',
+    path: ['end']
+  });
+export type TextAnchor = z.infer<typeof TextAnchorSchema>;
+export const DocumentAnchorSchema = TextAnchorSchema;
+export type DocumentAnchor = TextAnchor;
+
 export const MessageStatusSchema = z.enum(['sent', 'pending', 'failed', 'deleted']);
 export type MessageStatus = z.infer<typeof MessageStatusSchema>;
 
@@ -72,6 +99,7 @@ export type ConversationStatus = z.infer<typeof ConversationStatusSchema>;
 export const ConversationSchema = z.object({
   id: z.string(),
   entity: EntityRefSchema,
+  anchor: TextAnchorSchema.optional(),
   status: ConversationStatusSchema.default('open'),
   participantIds: z.array(z.string()).default([]),
   messageCount: z.number().nonnegative().default(0),
@@ -87,6 +115,7 @@ export type Conversation = z.infer<typeof ConversationSchema>;
 export type CreateConversationPayload = {
   id?: string;
   entity: EntityRef;
+  anchor?: TextAnchor;
   metadata?: Record<string, unknown>;
 };
 

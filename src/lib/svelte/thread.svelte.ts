@@ -1,5 +1,5 @@
 import type { ConversationDriver } from '../drivers/ConversationDriver.js';
-import type { Conversation, Message, ThreadTreeNode, GroupedReaction } from '../types.js';
+import type { Conversation, Message, ThreadTreeNode, GroupedReaction, TextAnchor } from '../types.js';
 import { ThreadTree } from '../core/ThreadTree.js';
 import { reconcileOptimisticMessages, reconcileAndMergeMessages } from '../core/reconciliation.js';
 import { groupReactions, normalizeReactionInput, type ReactionInput } from '../core/reactions.js';
@@ -36,6 +36,7 @@ export class ThreadStore {
   public tree = $derived<ThreadTreeNode[]>(ThreadTree.buildTree(this.messages));
   public totalCount = $derived<number>(this.messages.length);
   public isResolved = $derived<boolean>(this.conversation?.status === 'resolved');
+  public anchor = $derived<TextAnchor | null>(this.conversation?.anchor ?? null);
 
   constructor(
     driver: ConversationDriver,
@@ -187,6 +188,10 @@ export class ThreadStore {
 
   public async reopen() {
     return this.driver.updateConversationStatus(this.conversationId, 'open');
+  }
+
+  public async updateAnchor(anchor: TextAnchor | null): Promise<Conversation> {
+    return this.driver.updateConversationAnchor(this.conversationId, anchor);
   }
 
   public destroy() {

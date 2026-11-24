@@ -3,18 +3,20 @@ import type {
   Conversation,
   CreateConversationPayload,
   Message,
-  PostMessagePayload
+  PostMessagePayload,
+  TextAnchor
 } from '../types.js';
 import { hasUserReacted, normalizeReactionInput, type ReactionInput } from '../core/reactions.js';
 
 type Listener = (conversation: Conversation | null, messages: Message[]) => void;
 type EntityListener = (conversations: Conversation[]) => void;
+type EntitySubscription = { callback: EntityListener; entityType?: string };
 
 export class MemoryConversationDriver implements ConversationDriver {
   private conversations = new Map<string, Conversation>();
   private messages = new Map<string, Message[]>(); // Key: conversationId
   private listeners = new Map<string, Set<Listener>>();
-  private entityListeners = new Map<string, Set<EntityListener>>();
+  private entityListeners = new Map<string, Set<EntitySubscription>>();
 
   public async getConversation(id: string): Promise<Conversation | null> {
     return this.conversations.get(id) || null;
@@ -34,6 +36,21 @@ export class MemoryConversationDriver implements ConversationDriver {
     return null;
   }
 
+  public async listConversationsByEntity(
+    entityId: string,
+    entityType?: string
+  ): Promise<Conversation[]> {
+    const matches: Conversation[] = [];
+    for (const convo of this.conversations.values()) {
+      if (convo.entity.id === entityId && (!entityType || convo.entity.type === entityType)) {
+        matches.push(convo);
+      }
+    }
+    return matches.sort(
+      (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+    );
+  }
+
   public async createConversation(payload: CreateConversationPayload): Promise<Conversation> {
     const id = payload.id || `convo_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
     const now = new Date().toISOString();
@@ -41,6 +58,7 @@ export class MemoryConversationDriver implements ConversationDriver {
     const conversation: Conversation = {
       id,
       entity: payload.entity,
+      ...(payload.anchor ? { anchor: payload.anchor } : {}),
       status: 'open',
       participantIds: [],
       messageCount: 0,
@@ -73,6 +91,30 @@ export class MemoryConversationDriver implements ConversationDriver {
       status,
       resolvedAt: status === 'resolved' ? now : undefined,
       resolvedBy: status === 'resolved' ? resolvedBy : undefined,
+      updatedAt: now
+    };
+
+    this.conversations.set(id, updated);
+    this.notify(id);
+    this.notifyEntity(updated.entity.id);
+
+    return updated;
+  }
+
+  public async updateConversationAnchor(
+    id: string,
+    anchor: TextAnchor | null
+  ): Promise<Conversation> {
+    const convo = this.conversations.get(id);
+    if (!convo) {
+      throw new Error(`Conversation not found: ${id}`);
+    }
+
+    const now = new Date().toISOString();
+    const { anchor: _removed, ...rest } = convo;
+    const updated: Conversation = {
+      ...rest,
+      ...(anchor !== null ? { anchor } : {}),
       updatedAt: now
     };
 
@@ -279,25 +321,27 @@ export class MemoryConversationDriver implements ConversationDriver {
   public subscribeToEntityConversations(
     entityId: string,
     onUpdate: EntityListener,
-    _onError?: (error: Error) => void
+    _onError?: (error: Error) => void,
+    entityType?: string
   ): () => void {
     let set = this.entityListeners.get(entityId);
     if (!set) {
       set = new Set();
       this.entityListeners.set(entityId, set);
     }
-    set.add(onUpdate);
+    const sub: EntitySubscription = { callback: onUpdate, entityType };
+    set.add(sub);
 
     // Send immediate initial list
     const currentMatches = Array.from(this.conversations.values()).filter(
-      c => c.entity.id === entityId
+      c => c.entity.id === entityId && (!entityType || c.entity.type === entityType)
     );
     onUpdate(currentMatches);
 
     return () => {
       const currentSet = this.entityListeners.get(entityId);
       if (currentSet) {
-        currentSet.delete(onUpdate);
+        currentSet.delete(sub);
         if (currentSet.size === 0) {
           this.entityListeners.delete(entityId);
         }
@@ -326,9 +370,12 @@ export class MemoryConversationDriver implements ConversationDriver {
     if (!set || set.size === 0) return;
 
     const matches = Array.from(this.conversations.values()).filter(c => c.entity.id === entityId);
-    for (const listener of set) {
+    for (const sub of set) {
       try {
-        listener(matches);
+        const filtered = sub.entityType
+          ? matches.filter(c => c.entity.type === sub.entityType)
+          : matches;
+        sub.callback(filtered);
       } catch (err) {
         console.error('[MemoryConversationDriver] EntityListener error:', err);
       }

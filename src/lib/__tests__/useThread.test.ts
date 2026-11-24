@@ -144,4 +144,36 @@ describe('useThread (React)', () => {
     });
     expect(result.current?.messages[0].reactions).toHaveLength(0);
   });
+
+  it('exposes anchor state and updateAnchor', async () => {
+    const driver = new MemoryConversationDriver();
+    await driver.createConversation({
+      id: 'convo_anchor',
+      entity: { id: 'doc_1', type: 'document' },
+      anchor: {
+        start: 1,
+        end: 6,
+        quote: { exact: 'world' },
+        state: 'attached'
+      }
+    });
+
+    const { result } = renderThread(driver, 'convo_anchor');
+    expect(result.current?.anchor?.start).toBe(1);
+
+    await act(async () => {
+      await result.current!.updateAnchor({
+        start: 10,
+        end: 15,
+        quote: { exact: 'world' },
+        state: 'orphaned'
+      });
+    });
+    expect(result.current?.anchor).toMatchObject({ start: 10, state: 'orphaned' });
+
+    await act(async () => {
+      await result.current!.updateAnchor(null);
+    });
+    expect(result.current?.anchor).toBeNull();
+  });
 });

@@ -78,4 +78,37 @@ describe('ThreadStore (Svelte 5)', () => {
     expect(toggledOff.reactions).toHaveLength(0);
     store.destroy();
   });
+
+  it('tracks reactive anchor state and supports updateAnchor', async () => {
+    const driver = new MemoryConversationDriver();
+    const convo = await driver.createConversation({
+      entity: { id: 'doc_1', type: 'document' },
+      anchor: {
+        start: 2,
+        end: 7,
+        quote: { exact: 'hello' },
+        state: 'attached'
+      }
+    });
+
+    const store = new ThreadStore(driver, convo.id);
+    expect(store.anchor).toEqual({
+      start: 2,
+      end: 7,
+      quote: { exact: 'hello' },
+      state: 'attached'
+    });
+
+    await store.updateAnchor({
+      start: 5,
+      end: 10,
+      quote: { exact: 'hello' },
+      state: 'attached'
+    });
+    expect(store.anchor?.start).toBe(5);
+
+    await store.updateAnchor(null);
+    expect(store.anchor).toBeNull();
+    store.destroy();
+  });
 });

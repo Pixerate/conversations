@@ -3,7 +3,8 @@ import type {
   Conversation,
   CreateConversationPayload,
   Message,
-  PostMessagePayload
+  PostMessagePayload,
+  TextAnchor
 } from '../types.js';
 
 export interface ConversationDriver {
@@ -18,6 +19,11 @@ export interface ConversationDriver {
   getConversationByEntity(entityId: string, entityType?: string): Promise<Conversation | null>;
 
   /**
+   * Lists all conversations linked to an entity (optionally filtered by entityType).
+   */
+  listConversationsByEntity(entityId: string, entityType?: string): Promise<Conversation[]>;
+
+  /**
    * Creates a new conversation.
    */
   createConversation(payload: CreateConversationPayload): Promise<Conversation>;
@@ -30,6 +36,11 @@ export interface ConversationDriver {
     status: 'open' | 'resolved' | 'archived',
     resolvedBy?: string
   ): Promise<Conversation>;
+
+  /**
+   * Updates or clears (`null`) a conversation's text anchor.
+   */
+  updateConversationAnchor(id: string, anchor: TextAnchor | null): Promise<Conversation>;
 
   /**
    * Posts a new message to a conversation.
@@ -97,6 +108,7 @@ export interface ConversationDriver {
   subscribeToEntityConversations(
     entityId: string,
     onUpdate: (conversations: Conversation[]) => void,
-    onError?: (error: Error) => void
+    onError?: (error: Error) => void,
+    entityType?: string
   ): () => void;
 }

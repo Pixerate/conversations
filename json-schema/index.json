@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 1,
+  "schemas": [
+    {
+      "name": "NotificationActor",
+      "file": "NotificationActor.json"
+    },
+    {
+      "name": "EntityRef",
+      "file": "EntityRef.json"
+    },
+    {
+      "name": "TextQuoteSelector",
+      "file": "TextQuoteSelector.json"
+    },
+    {
+      "name": "TextAnchorState",
+      "file": "TextAnchorState.json"
+    },
+    {
+      "name": "TextAnchor",
+      "file": "TextAnchor.json"
+    },
+    {
+      "name": "MessageStatus",
+      "file": "MessageStatus.json"
+    },
+    {
+      "name": "MessageReaction",
+      "file": "MessageReaction.json"
+    },
+    {
+      "name": "Message",
+      "file": "Message.json"
+    },
+    {
+      "name": "ConversationStatus",
+      "file": "ConversationStatus.json"
+    },
+    {
+      "name": "Conversation",
+      "file": "Conversation.json"
+    }
+  ]
+}

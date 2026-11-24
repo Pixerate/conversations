@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { MemoryConversationDriver } from '../drivers/MemoryConversationDriver.js';
+import { createTextAnchor } from '../core/anchors.js';
 
 describe('MemoryConversationDriver', () => {
   it('creates and retrieves conversations by ID and entity', async () => {
@@ -169,5 +170,49 @@ describe('MemoryConversationDriver', () => {
     await expect(
       driver.toggleReaction('missing', { emoji: '👍', userId: 'user_2' })
     ).rejects.toThrow('Message not found: missing');
+  });
+
+  it('lists conversations by entity, updates/clears anchors, and filters entity subscriptions by type', async () => {
+    const driver = new MemoryConversationDriver();
+    const docText = 'Hello world of inline comments.';
+    const anchor = createTextAnchor(docText, 6, 11);
+
+    const docConvo = await driver.createConversation({
+      id: 'convo_doc',
+      entity: { id: 'shared_1', type: 'document', title: 'Spec' },
+      anchor
+    });
+    expect(docConvo.anchor).toEqual(anchor);
+
+    await driver.createConversation({
+      id: 'convo_task',
+      entity: { id: 'shared_1', type: 'task', title: 'Task' }
+    });
+
+    expect((await driver.listConversationsByEntity('shared_1')).map(c => c.id)).toEqual([
+      'convo_doc',
+      'convo_task'
+    ]);
+    expect(
+      (await driver.listConversationsByEntity('shared_1', 'document')).map(c => c.id)
+    ).toEqual(['convo_doc']);
+
+    const docUpdates: string[][] = [];
+    const unsub = driver.subscribeToEntityConversations(
+      'shared_1',
+      convos => docUpdates.push(convos.map(c => c.id)),
+      undefined,
+      'document'
+    );
+    expect(docUpdates).toEqual([['convo_doc']]);
+
+    const shifted = { ...anchor, start: 10, end: 15 };
+    const updated = await driver.updateConversationAnchor('convo_doc', shifted);
+    expect(updated.anchor).toEqual(shifted);
+
+    const cleared = await driver.updateConversationAnchor('convo_doc', null);
+    expect(cleared.anchor).toBeUndefined();
+    expect(docUpdates[docUpdates.length - 1]).toEqual(['convo_doc']);
+    unsub();
   });
 });
