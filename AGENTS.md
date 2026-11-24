@@ -18,7 +18,7 @@ This document defines mandatory rules, quality standards, and post-completion wo
 - **Atomic Commits**: Keep changes focused and traceable to the specific task or user requirement.
 
 ### 2. Always Create Unit Tests
-- **Mandatory Test Coverage**: Every new conversation manager, storage driver, thread tree algorithm, transcript serializer, Svelte 5 rune, or React hook MUST have corresponding Vitest unit tests in `src/lib/__tests__/*.test.ts`.
+- **Mandatory Test Coverage**: Every new conversation manager, storage driver, thread tree algorithm, transcript serializer, Svelte 5 rune, or React hook MUST have corresponding Vitest unit tests in `src/lib/__tests__/*.test.ts` (test/spec files outside `src/lib/__tests__/` are banned by `npm run lint` / `eslint.config.js`).
 - **Zero Mocking of Core Logic**: When testing algorithms (hierarchical thread building, tree flattening, parent-child ordering, cycle detection, orphan parent recovery, mention token extraction), test real behavior.
 - **Offline In-Memory Drivers**: Use `MemoryConversationDriver` for isolated, ultra-fast, deterministic unit tests without network or GCP dependencies.
 - **Edge Cases & Failure Modes**: Write explicit tests for:
@@ -28,15 +28,13 @@ This document defines mandatory rules, quality standards, and post-completion wo
   - Firestore snapshot listener lifecycle, unsubscribe cleanup, and optimistic updates.
   - Svelte 5 `$state` and `$derived` signal reactivity.
   - React 19 `useSyncExternalStore` hydration and flicker-free updates.
-- **Run Locally Before Finishing**: Always execute `npm run test` (or `npx vitest run`) and guarantee 100% green tests before committing.
+- **Run Locally Before Finishing**: Always execute `npm run lint`, `npm run check`, and `npm run test` before committing.
 
 ### 3. Maintain Architectural Boundaries
-- **UI-Agnostic Core**: Core logic in `src/lib/core/` and `src/lib/drivers/` must remain completely decoupled from specific frontend frameworks.
-- **Framework Wrappers**: Svelte 5 runes (`src/lib/svelte/`) and React hooks (`src/lib/react/`) are thin wrappers around the core store and drivers.
-- **Do NOT re-implement Rich Text Editing**: Input composition, markdown serialization, and formatting belong in `@pixerate/editor`.
-- **Do NOT re-implement Notifications**: In-app badges, email delivery, and multi-channel routing belong in `@pixerate/notifications`.
-- **Do NOT re-implement Ephemeral Presence**: Live cursors, room streams, and typing indicators belong in `@pixerate/realtime`.
-- **Do NOT re-implement Team RBAC**: Organizations, memberships, and fuel transactions belong in `@pixerate/teams`.
+Boundary isolation is enforced by `npm run lint` (`eslint.config.js`):
+- **UI-Agnostic Core**: `src/lib/core/` and `src/lib/drivers/` must not import Svelte, React, or `src/lib/{svelte,react}/`.
+- **Framework Wrappers**: `src/lib/svelte/` must not import React; `src/lib/react/` must not import Svelte.
+- **Separate Packages**: Do not import or re-implement `@pixerate/editor`, `@pixerate/notifications`, `@pixerate/realtime`, or `@pixerate/teams` inside `src/lib/`.
 
 ### 4. Check and Maintain `GOTCHAS.md`
 - **Check Before Starting Work**: Always review `GOTCHAS.md` before beginning work to avoid known issues, pitfalls, platform quirks, and edge cases.
@@ -61,7 +59,7 @@ This document defines mandatory rules, quality standards, and post-completion wo
        └──No───────────────┬────────────────────────┘
                            │
                            ▼
-          [Verify: `npm run check` & `npm run test`]
+          [Verify: `npm run lint`, `npm run check`, & `npm run test`]
                            │
                            ▼
           [Verify Library Build: `npm run build`]

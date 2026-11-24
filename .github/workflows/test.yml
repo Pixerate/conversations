@@ -38,6 +38,9 @@ jobs:
       - name: Install Dependencies
         run: npm ci
 
+      - name: Lint
+        run: npm run lint
+
       - name: Svelte & Type Check (sv check)
         run: npm run check
 
