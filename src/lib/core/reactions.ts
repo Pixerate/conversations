@@ -75,7 +75,6 @@ function reactionMatchesKey(
 
 /**
  * Aggregates emoji and sticker reactions into grouped summary items with tooltips and user participation.
- * Compatible with the Operative discussion reaction model.
  */
 export function groupReactions(
   reactions: MessageReaction[] = [],

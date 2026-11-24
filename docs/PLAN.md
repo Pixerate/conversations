@@ -80,9 +80,9 @@ flowchart TD
   - `buildThreadTree(messages, options)`: transforms flat arrays into trees with depth tracking and cycle protection.
   - `flattenTree(nodes)`: converts trees into display order for linear feeds.
   - `countDescendants(node)`: calculates total reply counts per comment.
-- **`Reconciliation` (Validated against Operative)**:
+- **`Reconciliation`**:
   - `reconcileOptimisticMessages(optimisticList, serverList, windowMs)`: fuzzy matching by content, author, and timestamp window (±10s) to eliminate duplicates when snapshot listeners receive confirmed writes.
-- **`Reactions` (Validated against Operative)**:
+- **`Reactions`**:
   - First-class emoji reactions (`addReaction`, `removeReaction`).
   - `groupReactions(reactions, currentUserId, nameResolver)`: aggregated emoji counts and friendly user tooltips.
 - **`ConversationManager`**:

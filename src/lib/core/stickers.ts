@@ -195,7 +195,7 @@ function isMultiPack(provider?: StickerProviderInput): boolean {
 /**
  * Formats a sticker id or `provider:id` ref into a message shortcode:
  * - Single sticker pack (`pixerateStickers()`): `:heart:`
- * - Multiple sticker packs (`[pixerateStickers(), slopMachineStickers()]` or combined provider): `:pixerate-heart:`
+ * - Multiple sticker packs (`[pixerateStickers(), studioPackStickers()]` or combined provider): `:pixerate-heart:`
  */
 export function formatStickerShortcode(
   idOrRef: string,
@@ -248,7 +248,7 @@ export function parseStickerShortcode(shortcode: string): string | null {
 
 /**
  * Combines multiple `StickerProvider` instances into a single `StickerProvider` whose ids
- * are dash-namespaced (`pixerate-heart`, `slop-machine-slop-bucket`) when multiple packs
+ * are dash-namespaced (`pixerate-heart`, `studio-pack-paint-bucket`) when multiple packs
  * are supplied, or returns the single provider directly when only one is given.
  */
 export function combineMessageStickerProviders(
@@ -268,7 +268,7 @@ export function combineMessageStickerProviders(
     throw new Error(`Duplicate sticker provider id "${dup}"; each provider must have a unique id.`);
   }
 
-  // Sort by longest provider id first so e.g. "slop-machine" matches before "slop"
+  // Sort by longest provider id first so e.g. "studio-pack" matches before "studio"
   const sortedByPrefix = [...providers].sort((a, b) => b.id.length - a.id.length);
   const byId = new Map(providers.map(p => [p.id, p]));
 
@@ -672,7 +672,7 @@ async function resolveFromSingleProvider(
 ): Promise<ResolvedSticker | undefined> {
   if (!provider.namespaced) {
     // Non-namespaced single provider (e.g. `pixerateStickers()`, id = "pixerate")
-    // Try exact id first (e.g. "heart", or "slop-bucket" in "slop-machine")
+    // Try exact id first (e.g. "heart", or "paint-bucket" in "studio-pack")
     const candidates: string[] = [];
     const colonIdx = clean.indexOf(':');
     if (colonIdx > 0) {
@@ -705,8 +705,8 @@ async function resolveFromSingleProvider(
   );
   if (direct) return direct;
 
-  // 2. If `clean` is dash-namespaced (`pixerate-heart` or `slop-machine-slop-bucket`) and the
-  // underlying provider uses colon refs (`pixerate:heart`, `slop-machine:slop-bucket`), try
+  // 2. If `clean` is dash-namespaced (`pixerate-heart` or `studio-pack-paint-bucket`) and the
+  // underlying provider uses colon refs (`pixerate:heart`, `studio-pack:paint-bucket`), try
   // splitting at each `-` from longest prefix to shortest.
   if (!clean.includes(':')) {
     const dashIndices: number[] = [];

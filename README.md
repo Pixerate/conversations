@@ -168,4 +168,4 @@ npm run build
 
 ## License
 
-Private repository. Copyright © Pixerate. All rights reserved.
+MIT — see [LICENSE](./LICENSE).
