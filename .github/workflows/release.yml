@@ -1,70 +1,111 @@
-name: Release & Tag Package
+name: Release
 
 on:
   push:
     branches: [main]
   workflow_dispatch:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  id-token: write
+
 jobs:
   release:
-    name: Build, Version & Tag Package
-    runs-on: ${{ vars.SELF_HOSTED_RUNNER == 'true' && 'self-hosted' || 'ubuntu-latest' }}
+    name: Build, Release & Publish (OIDC)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
     if: github.repository_owner == 'Pixerate' || github.event_name == 'workflow_dispatch'
-    permissions:
-      contents: write
-      id-token: write
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
+          ref: ${{ github.event_name == 'push' && 'main' || github.ref }}
           fetch-depth: 0
+
+      - name: Setup Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: 'https://registry.npmjs.org'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
 
       - name: Check for pending changesets
         id: changeset_check
         run: |
           CHANGESETS=$(find .changeset -name "*.md" ! -name "README.md" | wc -l)
           echo "count=$CHANGESETS" >> $GITHUB_OUTPUT
-          if [ "$CHANGESETS" -gt "0" ]; then
-            echo "Pending changesets found: $CHANGESETS"
+          if [ "$CHANGESETS" -gt "0" ] || [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "Release required. Pending changesets: $CHANGESETS"
+            echo "should_release=true" >> $GITHUB_OUTPUT
           else
             echo "No pending changesets found. Skipping release."
+            echo "should_release=false" >> $GITHUB_OUTPUT
           fi
 
-      - name: Setup Node.js 24
-        if: steps.changeset_check.outputs.count > 0 || github.event_name == 'workflow_dispatch'
-        uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: ${{ runner.environment != 'self-hosted' && 'npm' || '' }}
-
-      - name: Install dependencies
-        if: steps.changeset_check.outputs.count > 0 || github.event_name == 'workflow_dispatch'
-        run: npm ci
-
       - name: Configure Git
-        if: steps.changeset_check.outputs.count > 0 || github.event_name == 'workflow_dispatch'
+        if: steps.changeset_check.outputs.should_release == 'true'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
       - name: Version packages & update CHANGELOG.md files
-        if: steps.changeset_check.outputs.count > 0 || github.event_name == 'workflow_dispatch'
-        run: npx changeset version
+        if: steps.changeset_check.outputs.should_release == 'true' && steps.changeset_check.outputs.count != '0'
+        run: npm run version-packages
 
-      - name: Build package
-        if: steps.changeset_check.outputs.count > 0 || github.event_name == 'workflow_dispatch'
-        run: npm run build
+      - name: Lint, type check, test, and build package
+        if: steps.changeset_check.outputs.should_release == 'true'
+        run: |
+          npm run lint
+          npm run check
+          npm run test
+          npm run build
 
-      - name: Run test suite
-        if: steps.changeset_check.outputs.count > 0 || github.event_name == 'workflow_dispatch'
-        run: npm run test
+      - name: Refuse version that is already on npm
+        if: steps.changeset_check.outputs.should_release == 'true'
+        run: |
+          name=$(node -p "require('./package.json').name")
+          version=$(node -p "require('./package.json').version")
+          before=$(git show "HEAD:package.json" | node -p "JSON.parse(require('fs').readFileSync(0, 'utf8')).version")
+          if [ "$version" != "$before" ] && npm view "$name@$version" version > /dev/null 2>&1; then
+            echo "::error::$name@$version is already on npm but main is still at $before."
+            exit 1
+          fi
 
-      - name: Commit version bumps & changelogs, push git tags
-        if: steps.changeset_check.outputs.count > 0 || github.event_name == 'workflow_dispatch'
+      - name: Commit version bumps & changelogs and push to main
+        if: steps.changeset_check.outputs.should_release == 'true'
         run: |
           git add .
           git commit -m "chore(release): version packages and update changelogs [skip ci]" || echo "No changes to commit"
-          npx changeset tag
-          git push origin HEAD --tags || echo "Failed to push tags"
+          for attempt in 1 2 3; do
+            if git pull --rebase origin main && git push origin HEAD:main; then exit 0; fi
+            git rebase --abort 2> /dev/null || true
+            sleep $((attempt * 5))
+          done
+          echo "::error::Could not push the version commit to main; nothing was published."
+          exit 1
 
+      - name: Publish package to npm (OIDC)
+        if: steps.changeset_check.outputs.should_release == 'true'
+        run: npm run release
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_CONFIG_PROVENANCE: 'true'
+
+      - name: Push release tags
+        if: steps.changeset_check.outputs.should_release == 'true'
+        run: git push origin --tags
+
+      - name: Create GitHub Releases
+        if: steps.changeset_check.outputs.should_release == 'true'
+        run: node scripts/create-github-releases.mjs
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

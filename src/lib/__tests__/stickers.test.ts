@@ -120,13 +120,13 @@ const pixeratePack = createMockStickerPack('pixerate', 'Pixerate', [
   { id: 'party-popper', name: 'Party Popper', category: 'celebration', tags: ['party', 'ship'] }
 ]);
 
-const slopMachinePack = createMockStickerPack('slop-machine', 'Slop Machine', [
-  { id: 'slop-bucket', name: 'Slop Bucket', category: 'containers', tags: ['slop', 'bucket'] },
-  { id: 'slop-heart', name: 'Slop Heart', category: 'shapes', tags: ['love', 'slop'] }
+const studioPack = createMockStickerPack('studio-pack', 'Studio Pack', [
+  { id: 'paint-bucket', name: 'Paint Bucket', category: 'containers', tags: ['paint', 'bucket'] },
+  { id: 'paint-heart', name: 'Paint Heart', category: 'shapes', tags: ['love', 'paint'] }
 ]);
 
-const uchiagePack = createMockStickerPack('uchiage', 'Uchiage', [
-  { id: 'daruma', name: 'Daruma', category: 'tradition', tags: ['luck', 'goal'] }
+const festivalPack = createMockStickerPack('festival', 'Festival', [
+  { id: 'confetti', name: 'Confetti', category: 'celebration', tags: ['party', 'goal'] }
 ]);
 
 describe('Stickers core utilities', () => {
@@ -139,19 +139,19 @@ describe('Stickers core utilities', () => {
     });
 
     it('namespaces shortcodes with dashes when multiple sticker packs are provided', () => {
-      const packs = [pixeratePack, slopMachinePack, uchiagePack];
+      const packs = [pixeratePack, studioPack, festivalPack];
       expect(formatStickerShortcode('pixerate:heart', packs)).toBe(':pixerate-heart:');
-      expect(formatStickerShortcode('slop-machine:slop-bucket', packs)).toBe(
-        ':slop-machine-slop-bucket:'
+      expect(formatStickerShortcode('studio-pack:paint-bucket', packs)).toBe(
+        ':studio-pack-paint-bucket:'
       );
-      expect(formatStickerShortcode(':uchiage-daruma:', packs)).toBe(':uchiage-daruma:');
+      expect(formatStickerShortcode(':festival-confetti:', packs)).toBe(':festival-confetti:');
     });
 
     it('parses valid shortcodes and rejects non-shortcodes', () => {
       expect(parseStickerShortcode(':heart:')).toBe('heart');
       expect(parseStickerShortcode(':pixerate-heart:')).toBe('pixerate-heart');
-      expect(parseStickerShortcode(':slop-machine-slop-bucket:')).toBe(
-        'slop-machine-slop-bucket'
+      expect(parseStickerShortcode(':studio-pack-paint-bucket:')).toBe(
+        'studio-pack-paint-bucket'
       );
       expect(parseStickerShortcode('heart')).toBeNull();
       expect(parseStickerShortcode('👍')).toBeNull();
@@ -161,11 +161,11 @@ describe('Stickers core utilities', () => {
 
   describe('extractStickerTokensFromText & extractStickerIdsFromHtml', () => {
     it('extracts single-pack and multi-pack shortcodes from plain text', () => {
-      const text = 'Shipped it :party-popper:! Sending :pixerate-heart: and :slop-machine-slop-bucket:';
+      const text = 'Shipped it :party-popper:! Sending :pixerate-heart: and :studio-pack-paint-bucket:';
       expect(extractStickerTokensFromText(text)).toEqual([
         'party-popper',
         'pixerate-heart',
-        'slop-machine-slop-bucket'
+        'studio-pack-paint-bucket'
       ]);
     });
 
@@ -183,23 +183,23 @@ describe('Stickers core utilities', () => {
     it('extracts sticker tokens from richContent HTML attributes and text while shielding <pre>/<code>', () => {
       const html =
         '<p>Great job <span data-type="sticker" data-sticker="heart"></span> and ' +
-        '<span data-type="sticker" data-sticker-ref="slop-machine-slop-bucket"></span> ' +
-        'plus inline :uchiage-daruma:!</p>' +
+        '<span data-type="sticker" data-sticker-ref="studio-pack-paint-bucket"></span> ' +
+        'plus inline :festival-confetti:!</p>' +
         '<pre><code><span data-type="sticker" data-sticker="ignored-pre"></span> :ignored-code:</code></pre>';
 
       expect(extractStickerIdsFromHtml(html)).toEqual([
         'heart',
-        'slop-machine-slop-bucket',
-        'uchiage-daruma'
+        'studio-pack-paint-bucket',
+        'festival-confetti'
       ]);
     });
 
     it('extractMessageStickers deduplicates across content and richContent', () => {
       const stickers = extractMessageStickers(
         'Hello :heart:!',
-        '<p>Hello <span data-type="sticker" data-sticker="heart"></span> and <span data-sticker-id="daruma"></span>!</p>'
+        '<p>Hello <span data-type="sticker" data-sticker="heart"></span> and <span data-sticker-id="confetti"></span>!</p>'
       );
-      expect(stickers).toEqual(['heart', 'daruma']);
+      expect(stickers).toEqual(['heart', 'confetti']);
     });
   });
 
@@ -244,22 +244,22 @@ describe('Stickers core utilities', () => {
     });
 
     it('resolves dash-namespaced shortcodes across multiple sticker providers (including hyphenated pack ids)', async () => {
-      const providers = [pixeratePack, slopMachinePack, uchiagePack];
+      const providers = [pixeratePack, studioPack, festivalPack];
 
       const heart = await resolveSticker(providers, ':pixerate-heart:');
       expect(heart?.providerId).toBe('pixerate');
       expect(heart?.id).toBe('heart');
       expect(heart?.shortcode).toBe(':pixerate-heart:');
 
-      const bucket = await resolveSticker(providers, ':slop-machine-slop-bucket:');
-      expect(bucket?.providerId).toBe('slop-machine');
-      expect(bucket?.id).toBe('slop-bucket');
-      expect(bucket?.shortcode).toBe(':slop-machine-slop-bucket:');
+      const bucket = await resolveSticker(providers, ':studio-pack-paint-bucket:');
+      expect(bucket?.providerId).toBe('studio-pack');
+      expect(bucket?.id).toBe('paint-bucket');
+      expect(bucket?.shortcode).toBe(':studio-pack-paint-bucket:');
 
-      const daruma = await resolveSticker(providers, ':uchiage-daruma:');
-      expect(daruma?.providerId).toBe('uchiage');
-      expect(daruma?.id).toBe('daruma');
-      expect(daruma?.shortcode).toBe(':uchiage-daruma:');
+      const confetti = await resolveSticker(providers, ':festival-confetti:');
+      expect(confetti?.providerId).toBe('festival');
+      expect(confetti?.id).toBe('confetti');
+      expect(confetti?.shortcode).toBe(':festival-confetti:');
 
       // Un-namespaced bare id is rejected when multiple providers are active
       expect(await resolveSticker(providers, ':heart:')).toBeUndefined();
@@ -275,31 +275,31 @@ describe('Stickers core utilities', () => {
         list: () => ({ items: [], total: 0 }),
         search: () => ({ items: [], total: 0 }),
         describe: async ref => {
-          if (ref === 'slop-machine:slop-bucket') {
-            return slopMachinePack.describe('slop-bucket');
+          if (ref === 'studio-pack:paint-bucket') {
+            return studioPack.describe('paint-bucket');
           }
           return undefined;
         },
         load: async (ref, opts) => {
-          if (ref === 'slop-machine:slop-bucket') {
-            return slopMachinePack.load('slop-bucket', opts);
+          if (ref === 'studio-pack:paint-bucket') {
+            return studioPack.load('paint-bucket', opts);
           }
           throw new Error(`Unknown ref ${ref}`);
         }
       };
 
-      const resolved = await resolveSticker(editorCombined, ':slop-machine-slop-bucket:', {
+      const resolved = await resolveSticker(editorCombined, ':studio-pack-paint-bucket:', {
         includeDescription: true
       });
       expect(resolved).toBeDefined();
-      expect(resolved?.providerId).toBe('slop-machine');
-      expect(resolved?.id).toBe('slop-bucket');
-      expect(resolved?.ref).toBe('slop-machine:slop-bucket');
-      expect(resolved?.shortcode).toBe(':slop-machine-slop-bucket:');
+      expect(resolved?.providerId).toBe('studio-pack');
+      expect(resolved?.id).toBe('paint-bucket');
+      expect(resolved?.ref).toBe('studio-pack:paint-bucket');
+      expect(resolved?.shortcode).toBe(':studio-pack-paint-bucket:');
     });
 
     it('combineMessageStickerProviders pages, searches, and namespaces multiple sets', async () => {
-      const combined = combineMessageStickerProviders([pixeratePack, slopMachinePack, uchiagePack]);
+      const combined = combineMessageStickerProviders([pixeratePack, studioPack, festivalPack]);
       expect(combined.namespaced).toBe(true);
 
       const page1 = await combined.list({ limit: 2 });
@@ -309,14 +309,14 @@ describe('Stickers core utilities', () => {
 
       const page2 = await combined.list({ limit: 2, after: page1.next });
       expect(page2.items.map(i => i.id)).toEqual([
-        'slop-machine-slop-bucket',
-        'slop-machine-slop-heart'
+        'studio-pack-paint-bucket',
+        'studio-pack-paint-heart'
       ]);
 
       const searchHearts = await combined.search('heart');
       expect(searchHearts.items.map(i => i.id)).toEqual([
         'pixerate-heart',
-        'slop-machine-slop-heart'
+        'studio-pack-paint-heart'
       ]);
     });
   });
@@ -326,7 +326,7 @@ describe('Stickers core utilities', () => {
       const driver = new MemoryConversationDriver();
       const manager = new ConversationManager({
         driver,
-        stickerProvider: [pixeratePack, slopMachinePack]
+        stickerProvider: [pixeratePack, studioPack]
       });
 
       const convo = await manager.createConversation({
@@ -343,23 +343,23 @@ describe('Stickers core utilities', () => {
 
       const withReaction = await manager.addStickerReaction(
         msg.id,
-        'slop-machine-slop-heart',
+        'studio-pack-paint-heart',
         'user_alice',
         convo.id
       );
       expect(withReaction.reactions).toHaveLength(1);
       expect(withReaction.reactions[0]).toMatchObject({
-        emoji: ':slop-machine-slop-heart:',
-        sticker: 'slop-machine-slop-heart',
+        emoji: ':studio-pack-paint-heart:',
+        sticker: 'studio-pack-paint-heart',
         userId: 'user_alice'
       });
 
       const resolvedMap = await resolveMessageStickers(
-        [pixeratePack, slopMachinePack],
+        [pixeratePack, studioPack],
         withReaction
       );
       expect(resolvedMap.get(':pixerate-party-popper:')?.id).toBe('party-popper');
-      expect(resolvedMap.get('slop-machine-slop-heart')?.id).toBe('slop-heart');
+      expect(resolvedMap.get('studio-pack-paint-heart')?.id).toBe('paint-heart');
     });
   });
 
@@ -384,23 +384,23 @@ describe('Stickers core utilities', () => {
       });
 
       const [multiFind, multiDescribe] = createMessageStickerTools({
-        provider: () => [pixeratePack, slopMachinePack]
+        provider: () => [pixeratePack, studioPack]
       });
 
       const multiRes = (await multiFind.handler({ query: 'bucket' })) as any;
       expect(multiRes.namespaced).toBe(true);
       expect(multiRes.items[0]).toMatchObject({
-        id: 'slop-machine-slop-bucket',
-        shortcode: ':slop-machine-slop-bucket:'
+        id: 'studio-pack-paint-bucket',
+        shortcode: ':studio-pack-paint-bucket:'
       });
 
       const descMulti = (await multiDescribe.handler({
-        sticker: ':slop-machine-slop-bucket:'
+        sticker: ':studio-pack-paint-bucket:'
       })) as any;
       expect(descMulti).toMatchObject({
-        id: 'slop-machine-slop-bucket',
-        shortcode: ':slop-machine-slop-bucket:',
-        ref: 'slop-machine:slop-bucket'
+        id: 'studio-pack-paint-bucket',
+        shortcode: ':studio-pack-paint-bucket:',
+        ref: 'studio-pack:paint-bucket'
       });
     });
   });
@@ -409,27 +409,27 @@ describe('Stickers core utilities', () => {
 describe('sticker review fixes', () => {
   const sticker = (id: string) => ({ id, name: id, category: 'test', tags: [] });
   const packA = () => createMockStickerPack('pixerate', 'Pixerate', [sticker('heart')]);
-  const packB = () => createMockStickerPack('slop-machine', 'Slop', [sticker('heart')]);
+  const packB = () => createMockStickerPack('studio-pack', 'Studio', [sticker('heart')]);
 
   it('reports the owning pack when resolving against a combined provider', async () => {
     const combined = combineMessageStickerProviders([packA(), packB()]);
-    const resolved = await resolveSticker(combined, ':slop-machine-heart:');
+    const resolved = await resolveSticker(combined, ':studio-pack-heart:');
     expect(resolved).toMatchObject({
       id: 'heart',
-      providerId: 'slop-machine',
-      ref: 'slop-machine:heart',
-      shortcode: ':slop-machine-heart:'
+      providerId: 'studio-pack',
+      ref: 'studio-pack:heart',
+      shortcode: ':studio-pack-heart:'
     });
-    expect((await resolveSticker(combined, resolved!.ref))?.providerId).toBe('slop-machine');
+    expect((await resolveSticker(combined, resolved!.ref))?.providerId).toBe('studio-pack');
   });
 
   it('does not key multi-pack results by bare id', async () => {
     const map = await resolveMessageStickers([packA(), packB()], {
-      content: ':pixerate-heart: :slop-machine-heart:'
+      content: ':pixerate-heart: :studio-pack-heart:'
     });
     expect(map.has('heart')).toBe(false);
     expect(map.get('pixerate:heart')?.providerId).toBe('pixerate');
-    expect(map.get(':slop-machine-heart:')?.providerId).toBe('slop-machine');
+    expect(map.get(':studio-pack-heart:')?.providerId).toBe('studio-pack');
   });
 
   it('keeps bare id keys for a single pack', async () => {
@@ -509,8 +509,8 @@ describe('sticker review fixes', () => {
       }
     });
     const combined = combineMessageStickerProviders([spy(packA()), spy(packB())]);
-    await combined.list({ collection: 'slop-machine-animals' });
-    expect(new Set(seen.map(([id]) => id))).toEqual(new Set(['slop-machine']));
+    await combined.list({ collection: 'studio-pack-animals' });
+    expect(new Set(seen.map(([id]) => id))).toEqual(new Set(['studio-pack']));
     expect(seen.every(([, collection]) => collection === 'animals')).toBe(true);
   });
 
@@ -531,7 +531,7 @@ describe('sticker review fixes', () => {
 
   it('collapses the two spellings of a sticker in a single pack', () => {
     expect(formatStickerShortcode('pixerate-heart', packA())).toBe(':heart:');
-    expect(formatStickerShortcode('slop-machine-heart', packA())).toBe(':slop-machine-heart:');
+    expect(formatStickerShortcode('studio-pack-heart', packA())).toBe(':studio-pack-heart:');
   });
 
   it('removes only the targeted reaction when emoji and sticker share a display emoji', async () => {

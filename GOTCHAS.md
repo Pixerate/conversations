@@ -146,13 +146,25 @@ Separately, a conversation subscription built from two listeners (conversation d
 
 ### ⚠️ Gotcha
 
-Message sticker shortcodes use bare `:id:` when a single sticker pack is active (e.g. `:heart:` or `:slop-bucket:`) and dash-namespaced `:pack-id:` when multiple packs are provided (e.g. `:pixerate-heart:` or `:slop-machine-slop-bucket:`). Because both the pack ID (`slop-machine`) and the sticker ID (`slop-bucket`) can contain hyphens, splitting on the first `-` produces an invalid pack ID (`slop`).
+Message sticker shortcodes use bare `:id:` when a single sticker pack is active (e.g. `:heart:` or `:paint-bucket:`) and dash-namespaced `:pack-id:` when multiple packs are provided (e.g. `:pixerate-heart:` or `:studio-pack-paint-bucket:`). Because both the pack ID (`studio-pack`) and the sticker ID (`paint-bucket`) can contain hyphens, splitting on the first `-` produces an invalid pack ID (`studio`).
 
 Separately, `@pixerate/stickers` types `StickerDescription.variants` as `{ id: string; name: string }[]` whereas `@pixerate/editor/stickers` types it as `StickerVariant[]` (`('light' | 'dark')[]`).
 
 ### ✅ Solution
 
-- When resolving against an array of `StickerProvider`s, sort providers by descending `id.length` before matching `${provider.id}-` prefixes so longer hyphenated pack IDs (`slop-machine`) always match first.
+- When resolving against an array of `StickerProvider`s, sort providers by descending `id.length` before matching `${provider.id}-` prefixes so longer hyphenated pack IDs (`studio-pack`) always match first.
 - When resolving a dash-namespaced shortcode against a pre-combined `namespaced: true` provider that expects `provider:id` refs, test candidate `-` → `:` split positions from longest prefix to shortest.
 - A sticker id that begins with its own pack id (`logo` vs `pixerate-logo` in pack `pixerate`) is ambiguous in single-pack mode: `formatStickerShortcode` strips the prefix so `:pixerate-heart:` and `:heart:` stay one reaction. Avoid pack-prefixed sticker ids.
 - Type `StickerDescription.variants` structurally as `StickerVariant[] | Array<{ id: string; name: string }>` so providers from both `@pixerate/stickers` and `@pixerate/editor/stickers` are assignable without casts.
+
+---
+
+## 11. Public npm Provenance & OIDC Requires GitHub-Hosted Runners
+
+### ⚠️ Gotcha
+
+Publishing to public npm with `NPM_CONFIG_PROVENANCE: "true"` and npm Trusted Publishing (OIDC `id-token: write`) fails when `.github/workflows/release.yml` runs on a `self-hosted` runner, because npm's Sigstore provenance verifier checks that the OIDC token's `runner_environment` claim is `"github-hosted"`. Additionally, running `pull_request` workflows on a local `self-hosted` runner on a public repository exposes the runner to untrusted fork pull requests.
+
+### ✅ Solution
+
+- Always run `.github/workflows/release.yml` and `.github/workflows/test.yml` on `ubuntu-latest` (GitHub-hosted runners) for public repositories.

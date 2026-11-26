@@ -168,7 +168,7 @@ describe('ThreadTree', () => {
   });
 
   describe('buildCommentThreads', () => {
-    it('builds self-nesting threaded comments array matching Operative structure', () => {
+    it('builds self-nesting threaded comments array with nested replies array', () => {
       const flat = [
         { id: 'c1', content: 'Root comment', parentId: null },
         { id: 'c2', content: 'Reply to root', parentId: 'c1' },
