@@ -1,5 +1,11 @@
 # @pixerate/conversations
 
+## 0.4.0
+
+### Minor Changes
+
+- 7a00d8e: chore(deps): upgrade `@pixerate/schemas` v2, `zod` v4 (native JSON Schema export), SvelteKit 3, Vite 8, Vitest 5, and TypeScript 6.0
+
 ## 0.3.0
 
 ### Minor Changes
