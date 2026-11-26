@@ -1,5 +1,11 @@
 # @pixerate/conversations
 
+## 0.3.0
+
+### Minor Changes
+
+- 383a39e: feat: add `TextAnchorSchema`, text-range re-anchoring and entity thread helpers, Markdown transcript anchor context, JSON Schema exports, wire schema docs, and the `ConversationsKit` Swift package
+
 ## 0.2.0
 
 ### Minor Changes
