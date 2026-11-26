@@ -8,7 +8,7 @@ export const EntityRefSchema = z.object({
   type: z.string().default('task'),
   title: z.string().optional(),
   projectId: z.string().optional(),
-  metadata: z.record(z.unknown()).optional()
+  metadata: z.record(z.string(), z.unknown()).optional()
 });
 export type EntityRef = z.infer<typeof EntityRefSchema>;
 
@@ -70,9 +70,9 @@ export const MessageSchema = z.object({
   status: MessageStatusSchema.default('sent'),
   mentions: z.array(z.string()).default([]),
   stickers: z.array(z.string()).optional(),
-  attachments: z.array(z.record(z.unknown())).default([]),
+  attachments: z.array(z.record(z.string(), z.unknown())).default([]),
   reactions: z.array(MessageReactionSchema).default([]),
-  metadata: z.record(z.unknown()).optional(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
   createdAt: z.string(),
   updatedAt: z.string().optional()
 });
@@ -106,7 +106,7 @@ export const ConversationSchema = z.object({
   lastMessageAt: z.string().optional(),
   resolvedAt: z.string().optional(),
   resolvedBy: z.string().optional(),
-  metadata: z.record(z.unknown()).optional(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
   createdAt: z.string(),
   updatedAt: z.string()
 });

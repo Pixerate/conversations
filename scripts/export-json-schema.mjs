@@ -8,7 +8,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { zodToJsonSchema } from 'zod-to-json-schema';
+import { z } from 'zod';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -61,9 +61,10 @@ export async function generateJsonSchemas(typesPath = defaultTypesPath) {
 
   for (const entry of SCHEMA_EXPORTS) {
     const schema = definitions[entry.name];
-    const jsonSchema = zodToJsonSchema(schema, {
-      $refStrategy: 'none',
-      target: 'jsonSchema7'
+    const jsonSchema = z.toJSONSchema(schema, {
+      target: 'draft-7',
+      io: 'input',
+      reused: 'inline'
     });
     const file = `${entry.name}.json`;
     indexSchemas.push({ name: entry.name, file });

@@ -1,13 +1,16 @@
 {
+  "$schema": "http://json-schema.org/draft-07/schema#",
   "type": "object",
   "properties": {
     "start": {
       "type": "integer",
-      "minimum": 0
+      "minimum": 0,
+      "maximum": 9007199254740991
     },
     "end": {
       "type": "integer",
-      "minimum": 0
+      "minimum": 0,
+      "maximum": 9007199254740991
     },
     "quote": {
       "type": "object",
@@ -24,23 +27,20 @@
       },
       "required": [
         "exact"
-      ],
-      "additionalProperties": false
+      ]
     },
     "state": {
+      "default": "attached",
       "type": "string",
       "enum": [
         "attached",
         "orphaned"
-      ],
-      "default": "attached"
+      ]
     }
   },
   "required": [
     "start",
     "end",
     "quote"
-  ],
-  "additionalProperties": false,
-  "$schema": "http://json-schema.org/draft-07/schema#"
+  ]
 }
