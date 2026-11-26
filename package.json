@@ -1,6 +1,6 @@
 {
   "name": "@pixerate/conversations",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "UI-agnostic conversation, comment threading, and entity discussion library for Svelte 5, React 19, and Node.js on Google Cloud Platform",
   "type": "module",
   "main": "./dist/index.js",
