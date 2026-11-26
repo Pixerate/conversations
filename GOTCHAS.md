@@ -168,6 +168,7 @@ Publishing to public npm with `NPM_CONFIG_PROVENANCE: "true"` and npm Trusted Pu
 ### ✅ Solution
 
 - Always run `.github/workflows/release.yml` and `.github/workflows/test.yml` on `ubuntu-latest` (GitHub-hosted runners) for public repositories.
+- In single-package repositories, `changeset publish` creates plain `v<version>` git tags (e.g. `v0.2.0`) rather than `<scope>/<name>@<version>` tags, which satisfies SwiftPM (`ConversationsKit`) directly and is handled by `scripts/create-github-releases.mjs`.
 
 ---
 
