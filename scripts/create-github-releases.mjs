@@ -38,13 +38,22 @@ export function extractChangelogSection(changelogContent, version) {
 }
 
 /**
- * Parses a changeset tag in `<pkg>@<version>` format (for example `@pixerate/conversations@0.1.1`).
- * Returns null for non-changeset tags such as plain `v0.1.1`.
+ * Parses a release tag in either `<pkg>@<version>` format (monorepo changeset tags such as
+ * `@pixerate/conversations@0.1.1`) or `v<semver>` format (single-package changeset tags such
+ * as `v0.2.0`).
  * @param {string} tag
- * @returns {{ name: string; version: string } | null}
+ * @returns {{ name: string | null; version: string } | null}
  */
 export function parseTag(tag) {
-  if (typeof tag !== 'string') return null;
+  if (typeof tag !== 'string' || !tag) return null;
+
+  const semverMatch = tag.match(
+    /^v(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?)$/
+  );
+  if (semverMatch) {
+    return { name: null, version: semverMatch[1] };
+  }
+
   const atIndex = tag.lastIndexOf('@');
   if (atIndex <= 0) return null;
   const name = tag.slice(0, atIndex);
@@ -90,8 +99,8 @@ function getTagsToProcess(options, packageName) {
   }
 
   if (options.backfill) {
-    const pattern = packageName ? `${packageName}@*` : '*@*';
-    const raw = execFileSync('git', ['tag', '--list', pattern], {
+    const patterns = packageName ? ['v*', `${packageName}@*`] : ['v*', '*@*'];
+    const raw = execFileSync('git', ['tag', '--list', ...patterns], {
       encoding: 'utf8'
     });
     return raw
@@ -118,7 +127,7 @@ function getTagsToProcess(options, packageName) {
  */
 function createRelease(tag, packageName, baseDir, options) {
   const parsed = parseTag(tag);
-  if (!parsed || (packageName && parsed.name !== packageName)) {
+  if (!parsed || (parsed.name !== null && packageName && parsed.name !== packageName)) {
     console.log(`Skipping tag '${tag}' (not a release tag for '${packageName || 'package'}').`);
     return true;
   }

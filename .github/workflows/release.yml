@@ -106,6 +106,6 @@ jobs:
 
       - name: Create GitHub Releases
         if: steps.changeset_check.outputs.should_release == 'true'
-        run: node scripts/create-github-releases.mjs
+        run: node scripts/create-github-releases.mjs --backfill
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -1,0 +1,46 @@
+{
+  "type": "object",
+  "properties": {
+    "start": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "end": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "quote": {
+      "type": "object",
+      "properties": {
+        "exact": {
+          "type": "string"
+        },
+        "prefix": {
+          "type": "string"
+        },
+        "suffix": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "exact"
+      ],
+      "additionalProperties": false
+    },
+    "state": {
+      "type": "string",
+      "enum": [
+        "attached",
+        "orphaned"
+      ],
+      "default": "attached"
+    }
+  },
+  "required": [
+    "start",
+    "end",
+    "quote"
+  ],
+  "additionalProperties": false,
+  "$schema": "http://json-schema.org/draft-07/schema#"
+}

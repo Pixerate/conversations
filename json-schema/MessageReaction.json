@@ -1,0 +1,23 @@
+{
+  "type": "object",
+  "properties": {
+    "emoji": {
+      "type": "string"
+    },
+    "sticker": {
+      "type": "string"
+    },
+    "userId": {
+      "type": "string"
+    },
+    "createdAt": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "emoji",
+    "userId"
+  ],
+  "additionalProperties": false,
+  "$schema": "http://json-schema.org/draft-07/schema#"
+}

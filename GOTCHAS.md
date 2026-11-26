@@ -168,3 +168,17 @@ Publishing to public npm with `NPM_CONFIG_PROVENANCE: "true"` and npm Trusted Pu
 ### ✅ Solution
 
 - Always run `.github/workflows/release.yml` and `.github/workflows/test.yml` on `ubuntu-latest` (GitHub-hosted runners) for public repositories.
+- In single-package repositories, `changeset publish` creates plain `v<version>` git tags (e.g. `v0.2.0`) rather than `<scope>/<name>@<version>` tags, which satisfies SwiftPM (`ConversationsKit`) directly and is handled by `scripts/create-github-releases.mjs`.
+
+---
+
+## 12. UTF-16 Code Unit Offsets Across JavaScript and Swift (`TextAnchor`)
+
+### ⚠️ Gotcha
+
+Swift's `String.count` and `String.Index(..., offsetBy:)` operate on extended grapheme clusters (where `"👋🏽"` or `"👨‍👩‍👧"` counts as 1 `Character`), whereas JavaScript `string.length` / `string.slice(start, end)` and Apple's `NSRange` (`NSTextView`, `UITextView`) operate on **UTF-16 code units** (where `"👋🏽"` is 4 UTF-16 code units and `"👨‍👩‍👧"` is 8). Indexing a Swift `String` by character offsets shifts or traps when documents contain emoji or non-BMP characters.
+
+### ✅ Solution
+
+- Both `@pixerate/conversations` (`src/lib/core/anchors.ts`) and `ConversationsKit` (`swift/Sources/ConversationsKit/TextAnchorReconciler.swift`) define `TextAnchor.start` and `TextAnchor.end` strictly as **0-based UTF-16 code unit offsets**.
+- In Swift, slice `Array(text.utf16)` with `String(decoding: units[start..<end], as: UTF16.self)` and convert directly with `anchor.nsRange` (`NSRange(location: start, length: end - start)`).

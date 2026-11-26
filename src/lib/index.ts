@@ -1,4 +1,5 @@
 export * from './types.js';
+export * from './core/anchors.js';
 export * from './core/ThreadTree.js';
 export * from './core/ConversationManager.js';
 export * from './core/reconciliation.js';

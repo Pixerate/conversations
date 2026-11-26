@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { ConversationTranscript } from '../core/transcript.js';
+import {
+  ConversationTranscript,
+  formatDocumentThreadsAsMarkdown
+} from '../core/transcript.js';
 import type { Conversation, Message } from '../types.js';
 
 describe('ConversationTranscript', () => {
@@ -88,5 +91,85 @@ describe('ConversationTranscript', () => {
       []
     );
     expect(transcript).toContain('**Total Messages**: 0');
+  });
+
+  it('includes anchor quote and context in single-thread markdown transcripts', () => {
+    const anchoredConvo: Conversation = {
+      ...mockConversation,
+      entity: { id: 'doc-1', type: 'document', title: 'Architecture Spec' },
+      anchor: {
+        start: 10,
+        end: 20,
+        quote: {
+          exact: 'rate limit',
+          prefix: 'enforce ',
+          suffix: ' per user'
+        },
+        state: 'attached'
+      }
+    };
+
+    const transcript = ConversationTranscript.formatAsMarkdown(anchoredConvo, [messages[0]]);
+    expect(transcript).toContain('**Anchor**: 10..20 (attached)');
+    expect(transcript).toContain('**Quoted Text**: "rate limit"');
+    expect(transcript).toContain('**Anchor Context**: "enforce [rate limit] per user"');
+
+    const withoutContext = ConversationTranscript.formatAsMarkdown(anchoredConvo, [messages[0]], {
+      includeAnchorContext: false
+    });
+    expect(withoutContext).not.toContain('**Anchor Context**');
+  });
+
+  it('formats document threads sorted by anchor with status filtering', () => {
+    const openConvo: Conversation = {
+      ...mockConversation,
+      id: 'c_open',
+      entity: { id: 'doc-1', type: 'document', title: 'Architecture Spec' },
+      anchor: {
+        start: 20,
+        end: 30,
+        quote: { exact: 'second spot' },
+        state: 'attached'
+      },
+      status: 'open'
+    };
+    const resolvedConvo: Conversation = {
+      ...mockConversation,
+      id: 'c_resolved',
+      entity: { id: 'doc-1', type: 'document', title: 'Architecture Spec' },
+      anchor: {
+        start: 2,
+        end: 8,
+        quote: { exact: 'first' },
+        state: 'attached'
+      },
+      status: 'resolved'
+    };
+    const orphanedOpen: Conversation = {
+      ...mockConversation,
+      id: 'c_orphan',
+      entity: { id: 'doc-1', type: 'document', title: 'Architecture Spec' },
+      anchor: {
+        start: 5,
+        end: 9,
+        quote: { exact: 'gone' },
+        state: 'orphaned'
+      },
+      status: 'open'
+    };
+
+    const openOnly = formatDocumentThreadsAsMarkdown(
+      [
+        { conversation: openConvo, messages: [messages[0]] },
+        { conversation: resolvedConvo, messages: [messages[1]] },
+        { conversation: orphanedOpen, messages: [messages[2]] }
+      ],
+      { statusFilter: ['open'], orphanedLast: true }
+    );
+
+    expect(openOnly).toContain('# Document Comments: Architecture Spec');
+    expect(openOnly).toContain('**Threads**: 2');
+    expect(openOnly).not.toContain('c_resolved');
+    expect(openOnly.indexOf('c_open')).toBeLessThan(openOnly.indexOf('c_orphan'));
   });
 });

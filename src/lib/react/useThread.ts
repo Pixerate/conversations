@@ -1,6 +1,6 @@
 import { useSyncExternalStore, useMemo, useCallback } from 'react';
 import type { ConversationDriver } from '../drivers/ConversationDriver.js';
-import type { Conversation, Message, ThreadTreeNode, GroupedReaction } from '../types.js';
+import type { Conversation, Message, ThreadTreeNode, GroupedReaction, TextAnchor } from '../types.js';
 import { ThreadTree } from '../core/ThreadTree.js';
 import { reconcileOptimisticMessages, reconcileAndMergeMessages } from '../core/reconciliation.js';
 import { groupReactions, normalizeReactionInput, type ReactionInput } from '../core/reactions.js';
@@ -216,6 +216,10 @@ class ThreadStoreSubscriber {
   public reopen = async () => {
     return this.driver.updateConversationStatus(this.conversationId, 'open');
   };
+
+  public updateAnchor = async (anchor: TextAnchor | null): Promise<Conversation> => {
+    return this.driver.updateConversationAnchor(this.conversationId, anchor);
+  };
 }
 
 /**
@@ -369,8 +373,16 @@ export function useThread(
     return subscriber.reopen();
   }, [subscriber]);
 
+  const updateAnchor = useCallback(
+    (anchor: TextAnchor | null) => {
+      return subscriber.updateAnchor(anchor);
+    },
+    [subscriber]
+  );
+
   return {
     ...state,
+    anchor: state.conversation?.anchor ?? null,
     stickerProvider,
     totalCount: state.messages.length,
     isResolved: state.conversation?.status === 'resolved',
@@ -387,6 +399,7 @@ export function useThread(
     resolveMessageStickers: resolveMessageStickersForThread,
     getGroupedReactions,
     resolve,
-    reopen
+    reopen,
+    updateAnchor
   };
 }

@@ -261,5 +261,74 @@ describe('FirestoreConversationDriver', () => {
       unsub();
       expect(fs.listenerCount()).toBe(0);
     });
+
+    it('creates anchored conversations, lists by entity, updates and clears anchors without undefined fields', async () => {
+      const { driver, fs } = setup();
+
+      const c1 = await driver.createConversation({
+        id: 'convo-doc-1',
+        entity: { id: 'doc-1', type: 'document', title: 'Draft' },
+        anchor: {
+          start: 0,
+          end: 5,
+          quote: { exact: 'Hello', prefix: undefined, suffix: ' world' },
+          state: 'attached'
+        }
+      });
+      expect(c1.anchor?.quote).toEqual({ exact: 'Hello', suffix: ' world' });
+      expect(fs.raw('conversations/convo-doc-1')?.anchor).toEqual({
+        start: 0,
+        end: 5,
+        quote: { exact: 'Hello', suffix: ' world' },
+        state: 'attached'
+      });
+
+      await driver.createConversation({
+        id: 'convo-task-1',
+        entity: { id: 'doc-1', type: 'task' }
+      });
+
+      const docOnly = await driver.listConversationsByEntity('doc-1', 'document');
+      expect(docOnly.map(c => c.id)).toEqual(['convo-doc-1']);
+
+      const all = await driver.listConversationsByEntity('doc-1');
+      expect(all.map(c => c.id)).toEqual(['convo-doc-1', 'convo-task-1']);
+
+      const updated = await driver.updateConversationAnchor('convo-doc-1', {
+        start: 3,
+        end: 8,
+        quote: { exact: 'Hello', suffix: ' world' },
+        state: 'orphaned'
+      });
+      expect(updated.anchor?.state).toBe('orphaned');
+
+      const cleared = await driver.updateConversationAnchor('convo-doc-1', null);
+      expect(cleared.anchor).toBeUndefined();
+      expect('anchor' in (fs.raw('conversations/convo-doc-1') ?? {})).toBe(false);
+    });
+
+    it('filters entity conversation subscriptions by entityType when supplied', async () => {
+      const { driver } = setup();
+      await driver.createConversation({
+        id: 'convo-doc',
+        entity: { id: 'shared-entity', type: 'document' }
+      });
+      await driver.createConversation({
+        id: 'convo-task',
+        entity: { id: 'shared-entity', type: 'task' }
+      });
+
+      const updates: string[][] = [];
+      const unsub = driver.subscribeToEntityConversations(
+        'shared-entity',
+        convos => updates.push(convos.map(c => c.id)),
+        undefined,
+        'document'
+      );
+
+      await vi.waitFor(() => expect(updates).toHaveLength(1));
+      expect(updates[0]).toEqual(['convo-doc']);
+      unsub();
+    });
   });
 });

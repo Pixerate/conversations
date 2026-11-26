@@ -5,16 +5,24 @@ import {
 } from '../../../scripts/create-github-releases.mjs';
 
 describe('create-github-releases script helpers', () => {
-  it('parses scoped and unscoped changeset tags and ignores plain semver tags', () => {
-    expect(parseTag('@pixerate/conversations@0.1.1')).toEqual({
+  it('parses single-package v<semver> tags, scoped/unscoped changeset tags, and rejects non-release strings', () => {
+    expect(parseTag('v0.2.0')).toEqual({
+      name: null,
+      version: '0.2.0'
+    });
+    expect(parseTag('v1.0.0-rc.1')).toEqual({
+      name: null,
+      version: '1.0.0-rc.1'
+    });
+    expect(parseTag('@pixerate/conversations@0.2.0')).toEqual({
       name: '@pixerate/conversations',
-      version: '0.1.1'
+      version: '0.2.0'
     });
     expect(parseTag('conversations@1.2.3')).toEqual({
       name: 'conversations',
       version: '1.2.3'
     });
-    expect(parseTag('v0.1.1')).toBeNull();
+    expect(parseTag('main')).toBeNull();
     expect(parseTag('')).toBeNull();
   });
 

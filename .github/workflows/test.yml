@@ -47,3 +47,24 @@ jobs:
 
       - name: Build Package
         run: npm run build
+
+      - name: Verify JSON Schema is up to date
+        run: node scripts/export-json-schema.mjs --check
+
+  swift:
+    name: Swift Package (ConversationsKit)
+    runs-on: macos-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Toolchain
+        run: swift --version
+
+      - name: Build Swift Package
+        run: swift build
+
+      - name: Test Swift Package
+        run: swift test

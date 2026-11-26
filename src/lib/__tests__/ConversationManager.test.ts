@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { ConversationManager } from '../core/ConversationManager.js';
 import { MemoryConversationDriver } from '../drivers/MemoryConversationDriver.js';
+import { createTextAnchor } from '../core/anchors.js';
 
 describe('ConversationManager', () => {
   const authorAlice = { type: 'user' as const, id: 'user_alice', name: 'Alice Smith', email: 'alice@example.com' };
@@ -319,5 +320,49 @@ describe('ConversationManager', () => {
 
     expect(entityHook).toHaveBeenLastCalledWith([c1]);
     unsub();
+  });
+
+  it('lists entity conversations sorted by anchor and reconciles document anchors', async () => {
+    const driver = new MemoryConversationDriver();
+    const manager = new ConversationManager({ driver });
+    const doc = 'First anchor here. Second anchor later.';
+
+    const secondStart = doc.indexOf('Second anchor');
+    await manager.createConversation({
+      id: 'c_second',
+      entity: { id: 'doc_1', type: 'document' },
+      anchor: createTextAnchor(doc, secondStart, secondStart + 'Second anchor'.length)
+    });
+
+    const firstStart = doc.indexOf('First anchor');
+    await manager.createConversation({
+      id: 'c_first',
+      entity: { id: 'doc_1', type: 'document' },
+      anchor: createTextAnchor(doc, firstStart, firstStart + 'First anchor'.length)
+    });
+
+    const sorted = await manager.listConversationsByEntity('doc_1', {
+      entityType: 'document',
+      sortByAnchor: true
+    });
+    expect(sorted.map(c => c.id)).toEqual(['c_first', 'c_second']);
+
+    const edited = 'Prepended! First anchor here. Removed second.';
+    const preview = await manager.reconcileDocumentAnchors('doc_1', edited, { persist: false });
+    expect(preview[0].anchor?.state).toBe('attached');
+    expect(preview[0].anchor?.start).toBe(firstStart + 'Prepended! '.length);
+    expect(preview[1].anchor?.state).toBe('orphaned');
+    // persist: false leaves stored anchor untouched
+    expect((await manager.getConversation('c_first'))?.anchor?.start).toBe(firstStart);
+
+    const persisted = await manager.reconcileDocumentAnchors('doc_1', edited, { persist: true });
+    expect(persisted[0].anchor?.start).toBe(firstStart + 'Prepended! '.length);
+    expect((await manager.getConversation('c_first'))?.anchor?.start).toBe(
+      firstStart + 'Prepended! '.length
+    );
+    expect((await manager.getConversation('c_second'))?.anchor?.state).toBe('orphaned');
+
+    const cleared = await manager.updateConversationAnchor('c_first', null);
+    expect(cleared.anchor).toBeUndefined();
   });
 });

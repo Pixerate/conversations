@@ -3,7 +3,8 @@ import type {
   Conversation,
   CreateConversationPayload,
   Message,
-  PostMessagePayload
+  PostMessagePayload,
+  TextAnchor
 } from '../types.js';
 import { hasUserReacted, normalizeReactionInput, type ReactionInput } from '../core/reactions.js';
 
@@ -167,6 +168,21 @@ export class FirestoreConversationDriver implements ConversationDriver {
     return snapData(docs[0]) as Conversation;
   }
 
+  public async listConversationsByEntity(
+    entityId: string,
+    entityType?: string
+  ): Promise<Conversation[]> {
+    const ops = await this.ops();
+    const where: WhereClause[] = [['entity.id', '==', entityId]];
+    if (entityType) {
+      where.push(['entity.type', '==', entityType]);
+    }
+    const snap = await ops.getDocs(ops.query(this.conversationsCol, { where }));
+    return snapDocs(snap)
+      .map(d => snapData(d) as Conversation)
+      .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+  }
+
   public async createConversation(payload: CreateConversationPayload): Promise<Conversation> {
     const id = payload.id || `convo_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
     const now = new Date().toISOString();
@@ -174,6 +190,7 @@ export class FirestoreConversationDriver implements ConversationDriver {
     const conversation: Conversation = {
       id,
       entity: payload.entity,
+      ...(payload.anchor ? { anchor: payload.anchor } : {}),
       status: 'open',
       participantIds: [],
       messageCount: 0,
@@ -209,6 +226,33 @@ export class FirestoreConversationDriver implements ConversationDriver {
         status,
         resolvedAt: status === 'resolved' ? now : undefined,
         resolvedBy: status === 'resolved' ? resolvedBy : undefined,
+        updatedAt: now
+      };
+
+      tx.set(docRef, sanitizeDocument(updated));
+      return updated;
+    });
+  }
+
+  public async updateConversationAnchor(
+    id: string,
+    anchor: TextAnchor | null
+  ): Promise<Conversation> {
+    const ops = await this.ops();
+    const docRef = ops.doc(this.conversationPath(id));
+
+    return ops.runTransaction(async tx => {
+      const snap = await tx.get(docRef);
+      if (!snapExists(snap)) {
+        throw new Error(`Conversation not found: ${id}`);
+      }
+
+      const now = new Date().toISOString();
+      const existing = snapData(snap) as Conversation;
+      const { anchor: _removed, ...rest } = existing;
+      const updated: Conversation = {
+        ...rest,
+        ...(anchor !== null ? { anchor } : {}),
         updatedAt: now
       };
 
@@ -395,10 +439,15 @@ export class FirestoreConversationDriver implements ConversationDriver {
   public subscribeToEntityConversations(
     entityId: string,
     onUpdate: (conversations: Conversation[]) => void,
-    onError?: (error: Error) => void
+    onError?: (error: Error) => void,
+    entityType?: string
   ): () => void {
+    const where: WhereClause[] = [['entity.id', '==', entityId]];
+    if (entityType) {
+      where.push(['entity.type', '==', entityType]);
+    }
     return this.listen(
-      ops => ops.query(this.conversationsCol, { where: [['entity.id', '==', entityId]] }),
+      ops => ops.query(this.conversationsCol, { where }),
       snap => onUpdate(snapDocs(snap).map(d => snapData(d) as Conversation)),
       onError
     );
