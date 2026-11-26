@@ -1,4 +1,5 @@
 {
+  "$schema": "http://json-schema.org/draft-07/schema#",
   "type": "object",
   "properties": {
     "id": {
@@ -23,19 +24,18 @@
           "type": "string"
         },
         "type": {
+          "default": "user",
           "type": "string",
           "enum": [
             "user",
             "agent",
             "system"
-          ],
-          "default": "user"
+          ]
         }
       },
       "required": [
         "id"
-      ],
-      "additionalProperties": false
+      ]
     },
     "content": {
       "type": "string"
@@ -50,21 +50,21 @@
       ]
     },
     "status": {
+      "default": "sent",
       "type": "string",
       "enum": [
         "sent",
         "pending",
         "failed",
         "deleted"
-      ],
-      "default": "sent"
+      ]
     },
     "mentions": {
+      "default": [],
       "type": "array",
       "items": {
         "type": "string"
-      },
-      "default": []
+      }
     },
     "stickers": {
       "type": "array",
@@ -73,14 +73,18 @@
       }
     },
     "attachments": {
+      "default": [],
       "type": "array",
       "items": {
         "type": "object",
+        "propertyNames": {
+          "type": "string"
+        },
         "additionalProperties": {}
-      },
-      "default": []
+      }
     },
     "reactions": {
+      "default": [],
       "type": "array",
       "items": {
         "type": "object",
@@ -101,13 +105,14 @@
         "required": [
           "emoji",
           "userId"
-        ],
-        "additionalProperties": false
-      },
-      "default": []
+        ]
+      }
     },
     "metadata": {
       "type": "object",
+      "propertyNames": {
+        "type": "string"
+      },
       "additionalProperties": {}
     },
     "createdAt": {
@@ -123,7 +128,5 @@
     "author",
     "content",
     "createdAt"
-  ],
-  "additionalProperties": false,
-  "$schema": "http://json-schema.org/draft-07/schema#"
+  ]
 }

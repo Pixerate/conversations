@@ -10,12 +10,23 @@ updates:
       pixerate:
         patterns:
           - "@pixerate/*"
+      svelte-and-vite:
+        patterns:
+          - "@sveltejs/*"
+          - "svelte"
+          - "svelte-check"
+          - "vite"
+          - "vitest"
       minor-and-patch:
         patterns:
           - "*"
         update-types:
           - "minor"
           - "patch"
+    ignore:
+      # typescript-eslint@8 and svelte-check@4 peer-depend on typescript <6.1.0
+      - dependency-name: "typescript"
+        versions: [">= 6.1.0"]
 
   - package-ecosystem: "github-actions"
     directory: "/"

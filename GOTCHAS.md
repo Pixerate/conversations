@@ -182,3 +182,15 @@ Swift's `String.count` and `String.Index(..., offsetBy:)` operate on extended gr
 
 - Both `@pixerate/conversations` (`src/lib/core/anchors.ts`) and `ConversationsKit` (`swift/Sources/ConversationsKit/TextAnchorReconciler.swift`) define `TextAnchor.start` and `TextAnchor.end` strictly as **0-based UTF-16 code unit offsets**.
 - In Swift, slice `Array(text.utf16)` with `String(decoding: units[start..<end], as: UTF16.self)` and convert directly with `anchor.nsRange` (`NSRange(location: start, length: end - start)`).
+
+---
+
+## 13. TypeScript `~6.0.3` Peer Bound Between `@sveltejs/kit@3` and `typescript-eslint@8`
+
+### ⚠️ Gotcha
+
+`@sveltejs/kit@3.x` requires `typescript: ^6.0.0`, while `typescript-eslint@8.x` (and `svelte-check@4.x`) peer-depend on `typescript: >=4.8.4 <6.1.0` (`|| ^6.0.0`). Bumping `typescript` to `7.x` causes `npm ci` to fail with `ERESOLVE` on CI runners.
+
+### ✅ Solution
+
+- Pin `"typescript": "~6.0.3"` in `package.json` and ignore `typescript >= 6.1.0` in `.github/dependabot.yml` until `typescript-eslint` and `svelte-check` add TypeScript 7 support.
